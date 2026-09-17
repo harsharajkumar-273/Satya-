@@ -6,11 +6,13 @@ import time
 from pathlib import Path
 from typing import Any
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from planner import plan_run, inspect_repository
 
 app = FastAPI(title="Satya QA Service")
 RUNS: dict[str, dict[str, Any]] = {}
+STATIC_DIR = Path(__file__).with_name("static")
 
 
 class RunRequest(BaseModel):
@@ -56,3 +58,7 @@ async def get_run(run_id: str):
 @app.get("/health")
 async def health():
     return {"service": "satya", "status": "ok"}
+
+@app.get("/", include_in_schema=False)
+async def dashboard():
+    return FileResponse(STATIC_DIR / "index.html")
