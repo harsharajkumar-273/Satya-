@@ -23,14 +23,44 @@ class RunRequest(BaseModel):
     allow_mutations: bool = False
 
 
+def _url_smoke(url: str) -> dict[str, Any]:
+    """Safe, read-only URL audit used when no explicit flows are supplied."""
+    from playwright.sync_api import sync_playwright
+    console: list[str] = []
+    failed: list[str] = []
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.on("console", lambda msg: console.append(f"{msg.type}: {msg.text}"))
+        page.on("requestfailed", lambda req: failed.append(req.url))
+        response = page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        title = page.title()
+        links = page.locator("a").count()
+        forms = page.locator("form").count()
+        browser.close()
+    return {"url": url, "http_status": response.status if response else None,
+            "title": title, "links": links, "forms": forms,
+            "console_errors": [x for x in console if x.startswith("error:")],
+            "failed_requests": failed}
+
+
 async def _prepare(run_id: str, request: RunRequest) -> None:
     run = RUNS[run_id]
     run["status"] = "inspecting"
     if request.repository and Path(request.repository).is_dir():
         run["repository_inspection"] = inspect_repository(request.repository)
-    await asyncio.sleep(0)
-    run["status"] = "ready"
-    run["message"] = "Plan created. Connect an executor to run browser or repository checks."
+    if request.url:
+        run["status"] = "running"
+        try:
+            run["browser_audit"] = await asyncio.to_thread(_url_smoke, request.url)
+            run["status"] = "complete"
+            run["message"] = "Safe URL smoke audit completed."
+        except Exception as exc:
+            run["status"] = "failed"
+            run["message"] = f"URL audit failed: {exc}"
+    else:
+        run["status"] = "ready"
+        run["message"] = "Repository inspected; local executor is ready for an explicit run."
 
 
 @app.post("/runs", status_code=202)
