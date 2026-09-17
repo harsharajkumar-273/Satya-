@@ -1,0 +1,31 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Unit tests only: reconciler/claim/backend/auditor logic runs with no
+      # browser dependency. Playwright + chromium (needed only for
+      # scripts/run_demo.py's live browser demo) are intentionally not
+      # installed here to keep CI fast.
+      - name: Run test suite
+        run: PYTHONPATH=src pytest tests/ -q
