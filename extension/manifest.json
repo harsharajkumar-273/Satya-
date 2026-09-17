@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Satya QA",
+  "version": "0.1.0",
+  "description": "Send the current page to a local Satya QA service.",
+  "permissions": ["activeTab", "storage"],
+  "action": {"default_popup": "popup.html"}
+}
