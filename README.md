@@ -20,14 +20,20 @@ them by acting on the UI and then checking the UI's *claim* against the backend'
 ```bash
 pip install -r requirements.txt
 playwright install chromium
-python scripts/run_demo.py     # boots a buggy demo app, runs the agent against it
-pytest tests/                  # 15 unit tests
+python scripts/run_demo.py     # boots two buggy demo apps, runs the agent against both
+pytest tests/                  # 57 unit tests, no browser required
 ```
 
-`scripts/run_demo.py` starts a demo target app that contains three deliberate, hidden bugs,
-then points the agent at it twice: once with the bugs on (the agent should catch the UI
-lying) and once with them off (the agent should confirm everything agrees). Runs in well
-under a minute.
+`scripts/run_demo.py` starts the task-manager demo app (three deliberate, hidden bugs) and a
+second, independently-styled contacts app (different markup, selectors, and toast mechanism —
+see "Scope and current limitations"), then points the agent at each one twice: bugs on (should
+catch the lies) and bugs off (should confirm everything agrees). It also writes a self-contained
+HTML report to `demo_output/demo_report.html` with before/after screenshots for every flow.
+Runs in well under a minute; a checked-in sample of that report and of the CLI's output
+(`demo_output/*.html`, `demo_output/cli_junit.xml`) is included so you can see the shape of the
+output without running anything.
+
+For CI or scripted use without writing Python glue, see "Command-line usage" below.
 
 ## The core idea, in one picture
 
@@ -133,6 +139,14 @@ Add `?bugs=off` and the same app behaves correctly, so the demo shows the agent 
 the lies and — importantly — staying silent when the app is actually working (no false
 alarms).
 
+`src/contacts_demo/app.py` is a second, independently-styled demo target (a contacts list, not
+a task manager) with completely different markup, CSS classes, a `data-contact-id` attribute
+instead of `data-id`, and a `.banner[role=status]` toast instead of `#toast`. It reuses the same
+three bug *classes* (fake archive = `NO_REQUEST`, fake update = `UI_LIED`, leaked
+`_private_notes` = `DATA_LEAK`) through different flows, specifically so that pointing
+`BrowserAgent` at it — with new selector arguments and nothing else — is the generalization
+claim made concrete rather than just asserted. `scripts/run_demo.py` runs both apps.
+
 ## What the demo prints
 
 With bugs **on**, three problems caught, each with a plain-English explanation:
@@ -162,29 +176,80 @@ Worth being precise about, since the claims above are easy to over-read:
   logic — there's no per-flow `if delete / if save` branch. It does not mean *app-agnostic*:
   `BrowserAgent` still needs `row_selector`, `toast_selector`, and `id_attr` configured for
   the app under test, the same way any Playwright-based tool needs to know an app's DOM.
-- **The heuristic inferrer leans on toast text first.** A DOM-delta fallback catches
-  list-level changes (a row added/removed/edited) even with no toast, but a flow with
-  *neither* a toast *nor* a visible list change (e.g. "send an email," "trigger a webhook")
-  gives the heuristic engine nothing to form a claim from. That's precisely the gap the
-  `VLMClaimInferrer` seam exists to close, but it's an honest gap today, not a solved one.
-- **Validated against one demo app.** The three injected bugs and the 25-test suite prove the
-  reconciliation logic is sound, but the project has only been run end-to-end against the
-  purpose-built demo target — it hasn't yet been pointed at a real, pre-existing production
-  frontend to see how the selector/toast assumptions hold up against messier markup.
+  `scripts/run_demo.py` makes this concrete: the contacts app uses `.contact` /
+  `data-contact-id` / `.banner` instead of the task app's `.task` / `data-id` / `#toast`, and
+  nothing in `src/agent`, `src/reconcile`, or `src/browser` changed to support it — only the
+  `BrowserAgent(...)` call site's selector arguments did.
+- **The heuristic inferrer leans on toast text first, with a DOM-delta fallback.** A flow
+  with a changed/added/removed row is still caught with no toast at all (see
+  `test_infer_expanded_*` and the contacts app's "Updated!" wording — a different toast word
+  than the task app's "Saved!", still recognized because the vocab is generic). What's
+  genuinely still a gap: a flow with *neither* a toast *nor* any visible list change (e.g.
+  "send an email," "trigger a webhook") gives the heuristic engine nothing to form a claim
+  from. Rather than silently reporting that as a clean AGREE, `reconcile()` now returns a
+  distinct `NO_CLAIM` verdict for it (see "Verdicts" below) — the honest fix is surfacing the
+  gap, not pretending it's closed.
+- **Validated against two independently-styled demo apps, not yet a real production one.**
+  The task-manager app and the contacts app share no code, markup, or copy — proving the
+  selector-driven config generalizes, not just that the code works once. What it hasn't done
+  yet is meet a real, pre-existing frontend's messier markup, inconsistent toast patterns, or
+  multi-request flows (see "Advanced Capabilities" for what's covered — polling for eventual
+  consistency, WebSocket-pushed mutations — and what isn't yet — a single action firing
+  several unrelated backend calls).
+
+## Verdicts
+
+| Verdict | Meaning |
+|---|---|
+| `AGREE` | The UI's claim matches backend reality, **or** the UI asserted no success (e.g. an error toast) and there was nothing to check. |
+| `UI_LIED` | The UI claimed success; the backend disagrees. |
+| `NO_REQUEST` | The UI claimed an action succeeded but no state-changing request was ever sent. |
+| `BACKEND_ERROR` | A request fired but the backend rejected it, while the UI showed success. |
+| `DATA_LEAK` | The backend response carried a field the UI never displays. |
+| `NO_CLAIM` | No toast and no DOM delta at all — Veritas had no signal to reason about. **Not** the same as `AGREE`: it's a coverage gap, not a clean bill of health, and the CLI's exit code (and the JUnit report's `<skipped>`) treat it that way rather than folding it into "problems found." |
 
 ## Repo layout
 
 ```
 src/
-  models.py     pure decoupled data models (ActionTrace, NetworkCall, Claim, Verdict)
-  audit/        VeritasAuditor middleware for passive CI & existing Playwright tests
-  agent_demo/   the demo target app (FastAPI frontend + API, with hidden bugs)
-  browser/      Playwright agent with network interception; captures UI + traffic per action
-  agent/        claim inference (claim.py with Heuristic + VLM) + loop (loop.py)
-  reconcile/    backend snapshot/diff (backend.py) + claim-driven reconciler (reconciler.py)
-tests/          pytest suite (25 tests covering claims, VLM, reconciler, auditor, eventual consistency)
-scripts/        run_demo.py — one-command end-to-end demo
+  models.py       pure decoupled data models (ActionTrace, NetworkCall, Claim, Verdict)
+  cli.py          `veritas` CLI: YAML/JSON flow configs -> summary + HTML/JUnit reports + exit code
+  audit/          VeritasAuditor middleware for passive CI & existing Playwright tests
+  agent_demo/     demo target #1 (FastAPI task manager, 3 hidden bugs)
+  contacts_demo/  demo target #2 (FastAPI contacts app, different markup/selectors/toast,
+                  proving the pipeline generalizes via config, not hardcoding)
+  browser/        Playwright agent with HTTP + WebSocket network interception
+  agent/          claim inference (claim.py with Heuristic + VLM) + loop (loop.py)
+  reconcile/      backend snapshot/diff (backend.py) + claim-driven reconciler (reconciler.py)
+  report/         HTML report (html.py) and JUnit XML report (junit.py) generators
+tests/            pytest suite (57 tests: claims, VLM, reconciler, auditor, eventual consistency,
+                  WebSocket frames, CLI, both report formats, both demo apps) — no browser needed
+scripts/
+  run_demo.py       one-command end-to-end demo against both apps + HTML report
+  veritas_cli.py    thin executable wrapper around src/cli.py
+flows.example.yaml  example CLI config (see "Command-line usage")
+demo_output/        checked-in sample output from an actual run (HTML + JUnit reports)
 ```
+
+## Command-line usage
+
+For CI or any use where writing a Python script per app is overkill, `veritas_cli.py` takes a
+declarative flow config and drives the browser itself:
+
+```bash
+python scripts/run_demo.py &          # or however your app under test starts
+python scripts/veritas_cli.py --config flows.example.yaml \
+    --html-report report.html --junit-report junit.xml
+echo $?   # 0 if every flow agreed, 1 if any UI_LIED / NO_REQUEST / BACKEND_ERROR / DATA_LEAK
+```
+
+`flows.example.yaml` shows the format: a `base_url`, the app's `selectors` (configured once per
+app, not per flow — see "Scope and current limitations"), and a list of `flows`, each a
+`description` plus a sequence of declarative `actions` (`click`, `fill`, `press`, `check`,
+`wait_ms`). `NO_CLAIM` findings don't affect the exit code (see "Verdicts") — a build shouldn't
+go red because a flow had no toast and no DOM delta to reason about, only because Veritas
+actually caught a discrepancy. The JUnit report reports those flows as `<skipped>` instead, so
+the coverage gap is still visible in CI without failing the build over it.
 
 ## How to use Veritas in existing Playwright tests
 
@@ -206,9 +271,11 @@ def test_delete_action(page):
 ## Advanced Capabilities
 
 - **VLM Claim Inference**: Set `GEMINI_API_KEY` to enable `VLMClaimInferrer`, allowing multimodal models to inspect before/after screenshots and DOM state to understand subtle or unconventional UI affirmations, with automatic fallback to heuristics.
+- **WebSocket-aware**: `BrowserAgent` captures WebSocket frames the same way it captures HTTP traffic (`browser.agent.ws_frame_to_call`) — a mutation your app pushes over a socket instead of a REST call counts as "a mutating request was sent" exactly like a POST/PUT/PATCH/DELETE would, and a server->client push is still scanned for data leaks. Without this, a WS-driven app would misreport every correct mutation as `NO_REQUEST`.
 - **Eventual Consistency Support**: Set `poll_timeout` (e.g. `2.0`s) in `verify_action` or `VeritasAuditor` to handle asynchronous backends, read-replicas, and background queues without false positives.
 - **Deep Data Leak Auditing**: Scans nested response payloads for sensitive or internal keys (`_internal*`, `_private*`) delivered over the wire.
 - **Decoupled Architecture**: `models.py` has zero framework dependencies, allowing unit tests and reconciler logic to run in milliseconds without browser dependencies.
+- **Tolerant value comparison**: mutation checks compare claimed vs. actual values through `reconcile._values_match`, which normalizes bools and numbers before falling back to a case-insensitive string compare — so a checkbox claim of `"true"` matches a backend `True`, and `"3"` matches `3.0`, instead of a naive `str() == str()` false-flagging type drift between the DOM and JSON as a lie.
 
 ## How it maps to real work
 

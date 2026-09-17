@@ -19,9 +19,9 @@ from agent.claim import (
     VLMClaimInferrer,
     infer_claim,
 )
-from agent.loop import verify_action
+from agent.loop import summarize, verify_action
 from audit.middleware import VeritasAuditor
-from models import ActionTrace, NetworkCall, Verdict
+from models import ActionTrace, Finding, NetworkCall, Verdict
 from reconcile.backend import BackendSnapshot, diff_backend
 from reconcile.reconciler import check_data_leak, reconcile
 
@@ -202,6 +202,42 @@ def test_backend_error_caught():
 
 # --- data leak (including nested payloads) -----------------------------------
 
+def test_no_claim_when_nothing_observed_at_all():
+    """No toast, no DOM delta: Veritas should say it has no basis for a claim,
+    not silently report AGREE as if it had verified something."""
+    claim = Claim(ClaimKind.NONE, False, None, None, "toast=None; no identifiable DOM delta")
+    before = UISnapshot(toast_text=None, row_count=2, row_values={"1": "a", "2": "b"})
+    after = UISnapshot(toast_text=None, row_count=2, row_values={"1": "a", "2": "b"})
+    trace = ActionTrace("no-op click", b"", b"", None, 2, 2, ui_before=before, ui_after=after)
+    diff = diff_backend(BackendSnapshot.from_list([]), BackendSnapshot.from_list([]))
+    f = reconcile(claim, diff, trace)
+    assert f.verdict == Verdict.NO_CLAIM
+
+
+def test_agree_not_no_claim_when_toast_explains_failure():
+    """A toast that says the action failed IS a signal — Veritas understood the
+    flow and correctly has nothing to verify. That's AGREE, not NO_CLAIM."""
+    claim = Claim(ClaimKind.NONE, False, None, None, "toast='Error: could not save'")
+    before = UISnapshot(toast_text=None, row_count=1, row_values={"1": "a"})
+    after = UISnapshot(toast_text="Error: could not save", row_count=1, row_values={"1": "a"})
+    trace = ActionTrace("edit and save", b"", b"", "Error: could not save", 1, 1,
+                         ui_before=before, ui_after=after)
+    diff = diff_backend(BackendSnapshot.from_list([]), BackendSnapshot.from_list([]))
+    f = reconcile(claim, diff, trace)
+    assert f.verdict == Verdict.AGREE
+
+
+def test_no_claim_falls_back_to_agree_without_ui_snapshots():
+    """When no UISnapshot was captured at all (e.g. a caller using the lower-level
+    ActionTrace directly, as several tests in this file do via _trace()), Veritas
+    can't rule out a DOM delta it didn't see, so it stays conservative and reports
+    AGREE rather than guessing NO_CLAIM."""
+    claim = Claim(ClaimKind.NONE, False, None, None, "toast=None; no identifiable DOM delta")
+    diff = diff_backend(BackendSnapshot.from_list([]), BackendSnapshot.from_list([]))
+    f = reconcile(claim, diff, _trace(None, []))
+    assert f.verdict == Verdict.AGREE
+
+
 def test_data_leak_detected_flat():
     trace = _trace(None, [NetworkCall("GET", "/api/tasks", None, 200,
                                       [{"id": 1, "_internal_owner_email": "a@b.com"}])])
@@ -362,3 +398,103 @@ def test_demo_app_bugs_behave_as_designed():
     c.put("/api/tasks/2", json={})
     title = [t for t in c.get("/api/tasks?bugs=off").json() if t["id"] == 2][0]["title"]
     assert title == "Review PR #42"
+
+
+# --- WebSocket traffic: same reconciliation, different transport ------------
+
+from browser.agent import ws_frame_to_call  # noqa: E402
+
+
+def test_ws_frame_to_call_sent_parses_json():
+    call = ws_frame_to_call("ws://x/socket", "sent", '{"op": "delete", "id": 1}')
+    assert call.method == "WS_SEND"
+    assert call.request_body == {"op": "delete", "id": 1}
+    assert call.response_body is None
+
+
+def test_ws_frame_to_call_received_parses_json():
+    call = ws_frame_to_call("ws://x/socket", "received", '{"id": 1, "status": "deleted"}')
+    assert call.method == "WS_RECV"
+    assert call.response_body == {"id": 1, "status": "deleted"}
+    assert call.request_body is None
+
+
+def test_ws_frame_to_call_falls_back_to_raw_string_on_bad_json():
+    call = ws_frame_to_call("ws://x/socket", "sent", "not json")
+    assert call.request_body == "not json"
+
+
+def test_ws_frame_to_call_binary_payload_left_opaque():
+    call = ws_frame_to_call("ws://x/socket", "received", b"\x00\x01binary")
+    assert call.response_body == b"\x00\x01binary"
+
+
+def test_ws_frame_to_call_rejects_bad_direction():
+    with pytest.raises(ValueError):
+        ws_frame_to_call("ws://x/socket", "sideways", "{}")
+
+
+def test_removal_agree_via_websocket_send():
+    """A delete pushed over a WebSocket instead of an HTTP DELETE should be
+    treated exactly like the HTTP case -- this used to be indistinguishable
+    from a dropped request (NO_REQUEST) before WS frames counted as evidence
+    of a mutation attempt."""
+    claim = Claim(ClaimKind.REMOVAL, True, "1", None, "toast='Deleted!'; removed row id(s)=['1']")
+    diff = diff_backend(BackendSnapshot.from_list([{"id": 1}]), BackendSnapshot.from_list([]))
+    ws_call = ws_frame_to_call("ws://x/socket", "sent", '{"op": "delete", "id": 1}')
+    f = reconcile(claim, diff, _trace("Deleted!", [ws_call]))
+    assert f.verdict == Verdict.AGREE
+
+
+def test_removal_no_request_when_only_a_push_was_received():
+    """Receiving a WS push is not, by itself, evidence the client asked for a
+    mutation -- only WS_SEND counts, the same way only certain HTTP verbs do."""
+    claim = Claim(ClaimKind.REMOVAL, True, "1", None, "toast='Deleted!'; removed row id(s)=['1']")
+    diff = diff_backend(BackendSnapshot.from_list([{"id": 1}]), BackendSnapshot.from_list([{"id": 1}]))
+    ws_call = ws_frame_to_call("ws://x/socket", "received", '{"unrelated": true}')
+    f = reconcile(claim, diff, _trace("Deleted!", [ws_call]))
+    assert f.verdict == Verdict.NO_REQUEST
+
+
+def test_summarize_excludes_no_claim_from_problems_but_counts_it_separately():
+    from models import FlowResult
+
+    hard_failure = FlowResult(
+        flow="delete", trace=_trace("Deleted!", []),
+        claim_evidence="e",
+        findings=[Finding(Verdict.NO_REQUEST, "s", "d")],
+    )
+    inconclusive = FlowResult(
+        flow="no-op", trace=_trace(None, []),
+        claim_evidence="e",
+        findings=[Finding(Verdict.NO_CLAIM, "s", "d")],
+    )
+    clean = FlowResult(
+        flow="save", trace=_trace("Saved!", []),
+        claim_evidence="e",
+        findings=[Finding(Verdict.AGREE, "s", "d")],
+    )
+
+    summary = summarize([hard_failure, inconclusive, clean])
+    assert summary["problems_found"] == 1
+    assert summary["inconclusive_found"] == 1
+    assert summary["findings_total"] == 3
+
+
+def test_contacts_demo_app_bugs_behave_as_designed():
+    """Sanity check for the second, independently-styled demo target (different
+    markup/selectors/toast than agent_demo) -- same bug *classes*, different app,
+    proving the fixture itself is sound before BrowserAgent ever points at it."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from contacts_demo.app import app
+    c = TestClient(app)
+    assert "_private_notes" in c.get("/api/contacts?bugs=on").json()[0]
+    assert "_private_notes" not in c.get("/api/contacts?bugs=off").json()[0]
+    c.post("/api/reset")
+    c.put("/api/contacts/2?bugs=on", json={})
+    phone = [x for x in c.get("/api/contacts?bugs=off").json() if x["id"] == 2][0]["phone"]
+    assert phone == "555-0102"  # unchanged: bug 2 dropped the field
+    c.put("/api/contacts/2?bugs=off", json={"phone": "555-9999"})
+    phone = [x for x in c.get("/api/contacts?bugs=off").json() if x["id"] == 2][0]["phone"]
+    assert phone == "555-9999"  # bugs off: it persists correctly

@@ -26,6 +26,8 @@ class Verdict(str, Enum):
     NO_REQUEST = "NO_REQUEST"         # UI claimed an action but no API call fired at all
     BACKEND_ERROR = "BACKEND_ERROR"   # a call fired but the backend rejected it while UI showed success
     DATA_LEAK = "DATA_LEAK"           # backend returned fields the UI shouldn't have received
+    NO_CLAIM = "NO_CLAIM"             # no toast and no DOM delta at all — nothing to reason about,
+                                       # NOT the same as a verified-clean AGREE (see reconcile())
 
 
 @dataclass

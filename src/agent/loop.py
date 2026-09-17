@@ -19,7 +19,7 @@ from reconcile.backend import BackendSnapshot, diff_backend
 from reconcile.reconciler import check_data_leak, reconcile
 
 # Re-exports for backward compatibility
-__all__ = ["FlowResult", "verify_action", "summarize"]
+__all__ = ["FlowResult", "verify_action", "summarize", "HARD_FAILURE_VERDICTS"]
 
 
 def verify_action(
@@ -106,12 +106,27 @@ def verify_action(
     )
 
 
+# Verdicts that mean "Veritas checked this and found a real discrepancy."
+# NO_CLAIM is deliberately excluded: it means "no signal to check," which is
+# a coverage gap worth surfacing, not proof of a bug -- callers (like the CLI)
+# should be able to fail a build on problems_found without failing it every
+# time a flow has no toast and no DOM delta to reason about.
+HARD_FAILURE_VERDICTS = {
+    Verdict.UI_LIED,
+    Verdict.NO_REQUEST,
+    Verdict.BACKEND_ERROR,
+    Verdict.DATA_LEAK,
+}
+
+
 def summarize(results: list[FlowResult]) -> dict[str, Any]:
     all_findings = [f for r in results for f in r.findings]
-    problems = [f for f in all_findings if f.verdict != Verdict.AGREE]
+    problems = [f for f in all_findings if f.verdict in HARD_FAILURE_VERDICTS]
+    inconclusive = [f for f in all_findings if f.verdict == Verdict.NO_CLAIM]
     return {
         "flows_checked": len(results),
         "findings_total": len(all_findings),
         "problems_found": len(problems),
+        "inconclusive_found": len(inconclusive),
         "verdicts": [f.verdict.value for f in all_findings],
     }

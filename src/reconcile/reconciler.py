@@ -17,7 +17,12 @@ from reconcile.backend import BackendDiff
 # Re-exports for backward compatibility
 __all__ = ["Verdict", "Finding", "reconcile", "check_data_leak"]
 
-_MUTATING_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+_MUTATING_METHODS = ("POST", "PUT", "PATCH", "DELETE", "WS_SEND")
+# WS_SEND (see browser.agent.ws_frame_to_call) is the WebSocket analogue of a
+# state-changing HTTP verb: the client sent something over the socket. WS_RECV
+# (a server->client push) is deliberately excluded here, same as an HTTP GET
+# would be -- it's still scanned for data leaks by check_data_leak(), just not
+# treated as evidence the client attempted a mutation.
 
 
 def _values_match(claimed: Any, actual: Any) -> bool:
@@ -62,6 +67,23 @@ def _values_match(claimed: Any, actual: Any) -> bool:
     return str(claimed).strip().lower() == str(actual).strip().lower()
 
 
+def _no_observable_signal(claim: Claim, trace: ActionTrace) -> bool:
+    """
+    True when the heuristic engine had genuinely nothing to go on: no toast
+    text at all, and no visible DOM delta between before/after snapshots.
+    Distinguishes "we understood this and there was no success claim" (e.g.
+    an explicit failure toast) from "we have no idea what this action did."
+    """
+    had_toast = bool(trace.toast_text)
+    if had_toast:
+        return False
+    if trace.ui_before is None or trace.ui_after is None:
+        # No UI snapshots captured at all — can't rule out a DOM delta, so
+        # don't claim "no signal"; fall back to the ordinary AGREE path.
+        return False
+    return trace.ui_before.row_values == trace.ui_after.row_values
+
+
 def reconcile(
     claim: Claim,
     diff: BackendDiff,
@@ -71,6 +93,17 @@ def reconcile(
 ) -> Finding:
     """The generic reconciliation entry point. No flow-specific branches."""
     if claim.kind == ClaimKind.NONE or not claim.success_asserted:
+        if _no_observable_signal(claim, trace):
+            # Distinct from AGREE: this is not "verified and clean," it's
+            # "Veritas had nothing to reason about" (no toast, no DOM delta).
+            # Reporting it as AGREE would let a flow the tool never understood
+            # look identical to one it actually checked.
+            return Finding(
+                Verdict.NO_CLAIM,
+                "No toast and no DOM change were observed — Veritas could not "
+                "form a claim about what this action was supposed to do.",
+                claim.evidence,
+            )
         return Finding(
             Verdict.AGREE,
             "UI asserted no successful change; nothing to verify.",

@@ -3,13 +3,22 @@ Browser agent with network interception.
 
 This is the piece that makes the whole project possible: it drives the
 page like a user (click, type) AND records every network request/response
-the page makes while doing so. That second capability is the crux —
-purely-visual testing can only see what the UI *renders*; by capturing the
-actual HTTP traffic we can independently check what the frontend really
-told (or didn't tell) the backend.
+the page makes while doing so — HTTP *and* WebSocket. That second capability
+is the crux — purely-visual testing can only see what the UI *renders*; by
+capturing the actual traffic we can independently check what the frontend
+really told (or didn't tell) the backend.
 
 Playwright is the right tool here because it exposes both the DOM-driving
-API and a request/response event stream from the same session.
+API and a request/response (and WebSocket frame) event stream from the same
+session.
+
+HTTP calls and WebSocket frames both end up as NetworkCall entries so the
+reconciler doesn't need to know or care which transport carried a mutation:
+a WS_SEND frame counts as "a mutating request was sent" the same way a POST
+does (see reconcile.reconciler._MUTATING_METHODS), which matters for any app
+that pushes state changes over a socket instead of a REST call — those used
+to look identical to a dropped request (NO_REQUEST) even when the app was
+behaving correctly.
 """
 from __future__ import annotations
 
@@ -24,7 +33,34 @@ except ImportError:
     sync_playwright = None  # Playwright is optional for unit testing and models
 
 # Re-exports for backward compatibility
-__all__ = ["NetworkCall", "ActionTrace", "BrowserAgent"]
+__all__ = ["NetworkCall", "ActionTrace", "BrowserAgent", "ws_frame_to_call"]
+
+
+def ws_frame_to_call(url: str, direction: str, payload: Any) -> NetworkCall:
+    """
+    Convert one captured WebSocket frame into a NetworkCall, so the reconciler
+    can reason about a WS-pushed mutation exactly like HTTP traffic — no
+    separate code path needed.
+
+    direction is "sent" (client -> server: evidence the client attempted a
+    mutation, parallel to an HTTP POST/PUT/PATCH/DELETE) or "received"
+    (server -> client: a pushed update, also scanned for data leaks like any
+    other response body). Pure function, deliberately independent of
+    Playwright's WebSocket object so it's unit-testable without a browser.
+    """
+    if isinstance(payload, (bytes, bytearray)):
+        body: Any = payload  # binary frame; left opaque rather than guessed at
+    else:
+        try:
+            body = json.loads(payload)
+        except (TypeError, ValueError):
+            body = payload
+
+    if direction == "sent":
+        return NetworkCall(method="WS_SEND", url=url, request_body=body, status=None, response_body=None)
+    if direction == "received":
+        return NetworkCall(method="WS_RECV", url=url, request_body=None, status=None, response_body=body)
+    raise ValueError(f"direction must be 'sent' or 'received', got {direction!r}")
 
 
 class BrowserAgent:
@@ -66,6 +102,7 @@ class BrowserAgent:
         self._browser = self._pw.chromium.launch(headless=self._headless)
         self._page = self._browser.new_page(viewport=self._size)
         self._wire_network_capture()
+        self._wire_websocket_capture()
         return self
 
     def __exit__(self, *exc):
@@ -103,6 +140,26 @@ class BrowserAgent:
             )
 
         self._page.on("response", on_response)
+
+    def _wire_websocket_capture(self):
+        """
+        Mirror _wire_network_capture for WebSocket traffic. Apps that push
+        mutations over a socket instead of a REST call would otherwise be
+        invisible to the reconciler and look like a dropped request.
+        """
+        def on_websocket(ws):
+            url = ws.url
+
+            def on_frame_sent(payload):
+                self._captured.append(ws_frame_to_call(url, "sent", payload))
+
+            def on_frame_received(payload):
+                self._captured.append(ws_frame_to_call(url, "received", payload))
+
+            ws.on("framesent", on_frame_sent)
+            ws.on("framereceived", on_frame_received)
+
+        self._page.on("websocket", on_websocket)
 
     # --- navigation ---------------------------------------------------------
 

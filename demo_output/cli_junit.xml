@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuite name="veritas" tests="2" failures="2" skipped="0"><testcase classname="veritas" name="click Delete on task 1"><failure message="[NO_REQUEST] UI asserted a removal succeeded, but no state-changing request was sent." type="NO_REQUEST">[NO_REQUEST] UI asserted a removal succeeded, but no state-changing request was sent.
+toast='Deleted!'; DOM rows 3-&gt;2; removed row id(s)=['1']. No POST/PUT/PATCH/DELETE fired — the change exists only in the browser and would vanish on refresh.</failure></testcase><testcase classname="veritas" name="edit task 2 title to &quot;Review PR #42 (updated)&quot; and Save"><failure message="[UI_LIED] UI claimed item 2 now reads 'Review PR #42 (updated)', but the backend disagrees.; [DATA_LEAK] API response leaked internal field(s): _internal_owner_email." type="UI_LIED">[UI_LIED] UI claimed item 2 now reads 'Review PR #42 (updated)', but the backend disagrees.
+toast='Saved!'; changed row id(s)=['2']; new value='Review PR #42 (updated)'. Backend field changes for this item: none — the request body never included the edited value.
+
+[DATA_LEAK] API response leaked internal field(s): _internal_owner_email.
+PUT http://127.0.0.1:8077/api/tasks/2?bugs=on returned ['_internal_owner_email'] to the client — not shown on screen, but present in the payload.</failure></testcase></testsuite>

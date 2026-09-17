@@ -1,0 +1,31 @@
+# Example Veritas CLI config -- verifies the same two flows the demo script
+# runs, but declaratively and against a URL, so it can run in CI:
+#
+#   python scripts/run_demo.py &      # or however your app under test starts
+#   python scripts/veritas_cli.py --config flows.example.yaml --html-report report.html
+#
+# Selectors are configured once per app (see README's "Scope and current
+# limitations" section) -- Veritas doesn't need per-flow selectors, but it
+# does need to know what a "row" and a "toast" look like in *this* app.
+
+base_url: "http://127.0.0.1:8077"
+entry_path: "/?bugs=on"
+backend_read_path: "/api/tasks?bugs=off"
+headless: true
+
+selectors:
+  row_selector: ".task"
+  toast_selector: "#toast"
+  id_attr: "data-id"
+
+flows:
+  - description: "click Delete on task 1"
+    actions:
+      - click: '.del[data-id="1"]'
+
+  - description: 'edit task 2 title to "Review PR #42 (updated)" and Save'
+    actions:
+      - fill:
+          selector: 'input[data-id="2"]'
+          value: "Review PR #42 (updated)"
+      - click: '.save[data-id="2"]'
