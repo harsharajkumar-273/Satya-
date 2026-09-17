@@ -65,6 +65,7 @@ class ActionTrace:
     network_calls: list[NetworkCall] = field(default_factory=list)
     ui_before: UISnapshot | None = None
     ui_after: UISnapshot | None = None
+    action_id: str | None = None
 
 
 @dataclass

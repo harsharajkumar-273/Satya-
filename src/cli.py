@@ -97,6 +97,7 @@ def run_flows(config: dict[str, Any]) -> list[FlowResult]:
         id_attr=selectors.get("id_attr", "data-id"),
         storage_state=config.get("storage_state"),
         extra_http_headers=config.get("headers", {}),
+        api_filter=tuple(config.get("api_filters", ["/api/", "/graphql"])),
     ) as agent:
         agent.goto(entry_path)
         for flow in flows:

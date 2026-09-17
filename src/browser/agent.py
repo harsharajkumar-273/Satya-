@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import Any
 
 from models import ActionTrace, NetworkCall, UISnapshot
@@ -86,6 +87,7 @@ class BrowserAgent:
         id_attr: str = "data-id",
         storage_state: str | dict | None = None,
         extra_http_headers: dict[str, str] | None = None,
+        api_filter: str | tuple[str, ...] = "/api/",
     ):
         if sync_playwright is None:
             raise ImportError(
@@ -100,6 +102,8 @@ class BrowserAgent:
         self.id_attr = id_attr
         self.storage_state = storage_state
         self.extra_http_headers = extra_http_headers or {}
+        self.api_filter = (api_filter,) if isinstance(api_filter, str) else tuple(api_filter)
+        self._active_action_id: str | None = None
         self._captured: list[NetworkCall] = []
 
     def __enter__(self):
@@ -120,7 +124,7 @@ class BrowserAgent:
             started = time.perf_counter()
             req = response.request
             # only record calls to our own API, not static assets
-            if "/api/" not in req.url:
+            if self.api_filter and not any(token in req.url for token in self.api_filter):
                 return
             body = None
             try:
@@ -146,6 +150,7 @@ class BrowserAgent:
                     timestamp=time.time(),
                     duration_ms=(time.perf_counter() - started) * 1000,
                     initiator=getattr(req, "resource_type", None),
+                    correlation_id=self._active_action_id,
                 )
             )
 
@@ -226,6 +231,8 @@ class BrowserAgent:
         """
         Perform an arbitrary UI interaction and capture everything observably.
         """
+        action_id = uuid.uuid4().hex
+        self._active_action_id = action_id
         before_png = self._screenshot()
         before = UISnapshot(self._toast(), self._rows(), self._row_values())
         self._captured.clear()
@@ -233,7 +240,7 @@ class BrowserAgent:
         self._page.wait_for_timeout(400)  # let requests fire + toast render
         after_png = self._screenshot()
         after = UISnapshot(self._toast(), self._rows(), self._row_values())
-        return ActionTrace(
+        result = ActionTrace(
             action=description,
             ui_before_png=before_png,
             ui_after_png=after_png,
@@ -243,4 +250,7 @@ class BrowserAgent:
             network_calls=list(self._captured),
             ui_before=before,
             ui_after=after,
+            action_id=action_id,
         )
+        self._active_action_id = None
+        return result

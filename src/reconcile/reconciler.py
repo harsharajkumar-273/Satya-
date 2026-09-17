@@ -138,6 +138,13 @@ def reconcile(
 
     # 3. Does the backend diff actually contain the claimed effect?
     if claim.kind == ClaimKind.REMOVAL:
+        expected_removed = set(claim.target_ids) if claim.target_ids else ({claim.target_id} if claim.target_id else set())
+        if expected_removed and not expected_removed.issubset(diff.removed_ids):
+            return Finding(
+                Verdict.UI_LIED,
+                "UI claimed records were removed, but some are still on the backend.",
+                f"{claim.evidence}. Expected removed ids: {sorted(expected_removed)}; actual: {sorted(diff.removed_ids)}.",
+            )
         if claim.target_id and claim.target_id not in diff.removed_ids:
             return Finding(
                 Verdict.UI_LIED,
@@ -152,6 +159,9 @@ def reconcile(
             )
 
     elif claim.kind == ClaimKind.CREATION:
+        expected_added = set(claim.target_ids) if claim.target_ids else ({claim.target_id} if claim.target_id else set())
+        if expected_added and not expected_added.issubset(diff.added_ids):
+            return Finding(Verdict.UI_LIED, "UI claimed records were created, but some did not appear on the backend.", claim.evidence)
         if not diff.added_ids or (claim.target_id is not None and claim.target_id not in diff.added_ids):
             return Finding(
                 Verdict.UI_LIED,

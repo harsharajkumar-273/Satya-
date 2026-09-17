@@ -166,17 +166,15 @@ class HeuristicClaimInferrer(BaseClaimInferrer):
             if before_rows[rid] != after_rows[rid]
         }
 
-        if sum(map(len, (removed_ids, added_ids, changed_ids))) > 1:
-            return Claim(ClaimKind.NONE, True, None, None,
-                         "Multiple rows changed; a single affected record cannot be identified reliably.")
-
         # 1. Removal
         if toast_kind == ClaimKind.REMOVAL or (toast_kind == ClaimKind.NONE and removed_ids):
-            target = next(iter(removed_ids), None)
+            target = next(iter(removed_ids), None) if len(removed_ids) == 1 else None
             return Claim(
                 kind=ClaimKind.REMOVAL,
                 success_asserted=success or bool(removed_ids),
                 target_id=target,
+                target_ids=sorted(removed_ids),
+                operation="remove",
                 new_value=None,
                 evidence=(f"toast={after.toast_text!r}; DOM rows {before.row_count}->{after.row_count}; "
                           f"removed row id(s)={sorted(removed_ids) or 'none'}"),
@@ -184,18 +182,20 @@ class HeuristicClaimInferrer(BaseClaimInferrer):
 
         # 2. Creation
         if toast_kind == ClaimKind.CREATION or (toast_kind == ClaimKind.NONE and added_ids):
-            target = next(iter(added_ids), None)
+            target = next(iter(added_ids), None) if len(added_ids) == 1 else None
             return Claim(
                 kind=ClaimKind.CREATION,
                 success_asserted=success or bool(added_ids),
                 target_id=target,
+                target_ids=sorted(added_ids),
+                operation="create",
                 new_value=None,
                 evidence=f"toast={after.toast_text!r}; added row id(s)={sorted(added_ids) or 'none'}",
             )
 
         # 3. Mutation / Submission
         if toast_kind in (ClaimKind.MUTATION, ClaimKind.SUBMISSION) or changed_ids:
-            target = next(iter(changed_ids), None)
+            target = next(iter(changed_ids), None) if len(changed_ids) == 1 else None
             new_val = after_rows.get(target) if target else None
             kind = toast_kind if toast_kind != ClaimKind.NONE else ClaimKind.MUTATION
             return Claim(
@@ -203,6 +203,8 @@ class HeuristicClaimInferrer(BaseClaimInferrer):
                 success_asserted=success or bool(changed_ids),
                 target_id=target,
                 new_value=new_val,
+                target_ids=sorted(changed_ids),
+                operation="mutate",
                 evidence=(f"toast={after.toast_text!r}; changed row id(s)={sorted(changed_ids) or 'none'}; "
                           f"new value={new_val!r}"),
             )
