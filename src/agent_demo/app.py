@@ -32,7 +32,7 @@ import copy
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="Veritas demo target")
+app = FastAPI(title="Satya demo target")
 
 # in-memory "database"
 _SEED = [

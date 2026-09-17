@@ -92,6 +92,8 @@ def reconcile(
     corroboration_note: str | None = None,
 ) -> Finding:
     """The generic reconciliation entry point. No flow-specific branches."""
+    if claim.kind == ClaimKind.NONE and claim.success_asserted:
+        return Finding(Verdict.NO_CLAIM, "UI asserted success without an identifiable effect.", claim.evidence)
     if claim.kind == ClaimKind.NONE or not claim.success_asserted:
         if _no_observable_signal(claim, trace):
             # Distinct from AGREE: this is not "verified and clean," it's
@@ -131,6 +133,9 @@ def reconcile(
             f"{claim.evidence}. Failing call(s): {codes}, and backend state did not change.",
         )
 
+    if claim.target_id is None and claim.kind in (ClaimKind.REMOVAL, ClaimKind.CREATION):
+        return Finding(Verdict.NO_CLAIM, "The affected record could not be identified.", claim.evidence)
+
     # 3. Does the backend diff actually contain the claimed effect?
     if claim.kind == ClaimKind.REMOVAL:
         if claim.target_id and claim.target_id not in diff.removed_ids:
@@ -147,15 +152,23 @@ def reconcile(
             )
 
     elif claim.kind == ClaimKind.CREATION:
-        if not diff.added_ids:
+        if not diff.added_ids or (claim.target_id is not None and claim.target_id not in diff.added_ids):
             return Finding(
                 Verdict.UI_LIED,
-                "UI claimed something was created, but no new record appeared on the backend.",
+                "UI claimed a creation, but the claimed record did not appear on the backend.",
                 f"{claim.evidence}. Backend diff shows no additions.",
             )
 
     elif claim.kind in (ClaimKind.MUTATION, ClaimKind.SUBMISSION):
-        changed_here = diff.changed.get(claim.target_id or "", {})
+        if claim.target_id is None or claim.new_value is None:
+            return Finding(
+                Verdict.NO_CLAIM,
+                "UI asserted success, but the target or expected value could not be identified.",
+                claim.evidence,
+            )
+        changed_here = diff.changed.get(claim.target_id, {})
+        if claim.field_name is not None:
+            changed_here = {k: v for k, v in changed_here.items() if k == claim.field_name}
         persisted_to_claim = any(
             _values_match(claim.new_value, new) for (_old, new) in changed_here.values()
         )
@@ -184,28 +197,44 @@ def reconcile(
     )
 
 
-def _find_leaked_keys(data: Any, forbidden_prefixes: tuple[str, ...]) -> list[str]:
+def _find_leaked_keys(data: Any, forbidden_prefixes: tuple[str, ...], path: str = "") -> list[str]:
     """Recursively search for leaked internal keys in nested JSON payloads."""
     leaked: list[str] = []
     if isinstance(data, dict):
         for k, v in data.items():
             if any(k.startswith(p) for p in forbidden_prefixes):
-                leaked.append(k)
-            leaked.extend(_find_leaked_keys(v, forbidden_prefixes))
+                leaked.append(f"{path}.{k}" if path else k)
+            leaked.extend(_find_leaked_keys(v, forbidden_prefixes, f"{path}.{k}" if path else k))
     elif isinstance(data, list):
-        for item in data:
-            leaked.extend(_find_leaked_keys(item, forbidden_prefixes))
+        for index, item in enumerate(data):
+            leaked.extend(_find_leaked_keys(item, forbidden_prefixes, f"{path}[{index}]"))
     return sorted(set(leaked))
 
 
 def check_data_leak(
     trace: ActionTrace,
     forbidden_prefixes: tuple[str, ...] = ("_internal", "_private"),
+    forbidden_keys: tuple[str, ...] = (),
+    allowed_paths: tuple[str, ...] = (),
 ) -> Finding | None:
     """Independent of any claim: did any API response carry internal-only fields?"""
     for call in trace.network_calls:
         body = call.response_body
         leaked = _find_leaked_keys(body, forbidden_prefixes)
+        if forbidden_keys:
+            leaked.extend(_find_leaked_keys(body, tuple(),))
+            def walk(value: Any, path: str = "") -> None:
+                if isinstance(value, dict):
+                    for key, child in value.items():
+                        current = f"{path}.{key}" if path else key
+                        if key in forbidden_keys and current not in allowed_paths:
+                            leaked.append(current)
+                        walk(child, current)
+                elif isinstance(value, list):
+                    for index, child in enumerate(value):
+                        walk(child, f"{path}[{index}]")
+            walk(body)
+        leaked = sorted(set(leaked))
         if leaked:
             return Finding(
                 Verdict.DATA_LEAK,

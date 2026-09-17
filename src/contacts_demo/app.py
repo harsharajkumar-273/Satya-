@@ -29,7 +29,7 @@ import copy
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
-app = FastAPI(title="Veritas contacts demo target")
+app = FastAPI(title="Satya contacts demo target")
 
 _SEED = [
     {"id": 1, "name": "Alice Cooper", "phone": "555-0101", "_private_notes": "VIP, handle personally"},

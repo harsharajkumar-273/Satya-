@@ -23,6 +23,7 @@ behaving correctly.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from models import ActionTrace, NetworkCall, UISnapshot
@@ -83,6 +84,8 @@ class BrowserAgent:
         row_selector: str = ".task",
         toast_selector: str = "#toast",
         id_attr: str = "data-id",
+        storage_state: str | dict | None = None,
+        extra_http_headers: dict[str, str] | None = None,
     ):
         if sync_playwright is None:
             raise ImportError(
@@ -95,12 +98,15 @@ class BrowserAgent:
         self.row_selector = row_selector
         self.toast_selector = toast_selector
         self.id_attr = id_attr
+        self.storage_state = storage_state
+        self.extra_http_headers = extra_http_headers or {}
         self._captured: list[NetworkCall] = []
 
     def __enter__(self):
         self._pw = sync_playwright().start()
         self._browser = self._pw.chromium.launch(headless=self._headless)
-        self._page = self._browser.new_page(viewport=self._size)
+        self._page = self._browser.new_page(viewport=self._size, storage_state=self.storage_state,
+                                            extra_http_headers=self.extra_http_headers)
         self._wire_network_capture()
         self._wire_websocket_capture()
         return self
@@ -111,6 +117,7 @@ class BrowserAgent:
 
     def _wire_network_capture(self):
         def on_response(response):
+            started = time.perf_counter()
             req = response.request
             # only record calls to our own API, not static assets
             if "/api/" not in req.url:
@@ -136,6 +143,9 @@ class BrowserAgent:
                     request_body=body,
                     status=response.status,
                     response_body=resp_body,
+                    timestamp=time.time(),
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                    initiator=getattr(req, "resource_type", None),
                 )
             )
 

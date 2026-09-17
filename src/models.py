@@ -38,6 +38,10 @@ class NetworkCall:
     request_body: Any = None
     status: int | None = None
     response_body: Any = None
+    timestamp: float | None = None
+    initiator: str | None = None
+    duration_ms: float | None = None
+    correlation_id: str | None = None
 
 
 @dataclass
@@ -72,6 +76,9 @@ class Claim:
     new_value: str | None
     evidence: str
     confidence: float = 1.0
+    field_name: str | None = None
+    target_ids: list[str] = field(default_factory=list)
+    operation: str | None = None
 
 
 @dataclass

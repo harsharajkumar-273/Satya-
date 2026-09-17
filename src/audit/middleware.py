@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+from dataclasses import replace
+from agent.loop import HARD_FAILURE_VERDICTS, poll_for_agreement, validate_polling
 from typing import Any, Callable
 
 from agent.claim import BaseClaimInferrer, infer_claim
@@ -41,6 +43,9 @@ class VeritasAuditor:
         inferrer: BaseClaimInferrer | None = None,
         api_filter: str = "/api/",
         poll_timeout: float = 0.0,
+        poll_interval: float = 0.1,
+        backend_id_key: str = "id",
+        field_name: str | None = None,
     ):
         self.page = page
         self.backend_fetch_fn = backend_fetch_fn
@@ -49,7 +54,11 @@ class VeritasAuditor:
         self.id_attr = id_attr
         self.inferrer = inferrer
         self.api_filter = api_filter
+        validate_polling(poll_timeout, poll_interval)
         self.poll_timeout = poll_timeout
+        self.poll_interval = poll_interval
+        self.backend_id_key = backend_id_key
+        self.field_name = field_name
 
         self.recorded_calls: list[NetworkCall] = []
         self._action_calls: list[NetworkCall] = []
@@ -163,7 +172,7 @@ class VeritasAuditor:
         """
         fetch_fn = backend_fetch_fn or self.backend_fetch_fn
         before_records = fetch_fn() if fetch_fn else []
-        before_snap = BackendSnapshot.from_list(before_records)
+        before_snap = BackendSnapshot.from_list(before_records, id_key=self.backend_id_key)
         before_ui = self.capture_ui_snapshot()
         before_png = self.capture_screenshot()
 
@@ -181,7 +190,7 @@ class VeritasAuditor:
         after_ui = self.capture_ui_snapshot()
         after_png = self.capture_screenshot()
         after_records = fetch_fn() if fetch_fn else []
-        after_snap = BackendSnapshot.from_list(after_records)
+        after_snap = BackendSnapshot.from_list(after_records, id_key=self.backend_id_key)
 
         action_calls = list(self._action_calls)
         trace = ActionTrace(
@@ -205,9 +214,19 @@ class VeritasAuditor:
             inferrer=self.inferrer,
         )
 
+        if self.field_name is not None:
+            claim = replace(claim, field_name=self.field_name)
         diff = diff_backend(before_snap, after_snap)
         finding = reconcile(claim, diff, trace)
 
+        if fetch_fn is None:
+            finding = Finding(Verdict.NO_CLAIM, "No backend reader configured; persistence cannot be verified.", claim.evidence)
+        else:
+            finding = poll_for_agreement(
+                claim, trace, before_snap,
+                lambda: BackendSnapshot.from_list(fetch_fn(), id_key=self.backend_id_key),
+                finding, poll_timeout=self.poll_timeout, poll_interval=self.poll_interval,
+            )
         findings = [finding]
         leak = check_data_leak(trace)
         if leak:
@@ -227,18 +246,18 @@ class VeritasAuditor:
         leak = check_data_leak(dummy_trace)
         return [leak] if leak else []
 
-    def get_problems(self) -> list[Finding]:
-        """Return all non-AGREE findings encountered across audited actions."""
+    def get_problems(self, *, fail_on_inconclusive: bool = False) -> list[Finding]:
+        """Return discrepancies, optionally including inconclusive checks."""
         problems: list[Finding] = []
         for res in self.results:
             for f in res.findings:
-                if f.verdict != Verdict.AGREE:
+                if f.verdict in HARD_FAILURE_VERDICTS or (fail_on_inconclusive and f.verdict == Verdict.NO_CLAIM):
                     problems.append(f)
         return problems
 
-    def assert_truthful(self) -> None:
+    def assert_truthful(self, *, fail_on_inconclusive: bool = False) -> None:
         """Raise an AssertionError if any action resulted in a UI lie or leak."""
-        problems = self.get_problems()
+        problems = self.get_problems(fail_on_inconclusive=fail_on_inconclusive)
         if problems:
             messages = [f"[{p.verdict.value}] {p.summary} ({p.detail})" for p in problems]
             raise AssertionError(

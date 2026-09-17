@@ -166,6 +166,10 @@ class HeuristicClaimInferrer(BaseClaimInferrer):
             if before_rows[rid] != after_rows[rid]
         }
 
+        if sum(map(len, (removed_ids, added_ids, changed_ids))) > 1:
+            return Claim(ClaimKind.NONE, True, None, None,
+                         "Multiple rows changed; a single affected record cannot be identified reliably.")
+
         # 1. Removal
         if toast_kind == ClaimKind.REMOVAL or (toast_kind == ClaimKind.NONE and removed_ids):
             target = next(iter(removed_ids), None)

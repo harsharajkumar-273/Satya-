@@ -10,6 +10,7 @@ diff generically.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 from typing import Any, Callable
 
 
@@ -30,9 +31,9 @@ class BackendSnapshot:
             if callable(id_key):
                 rid = id_key(r)
                 if rid:
-                    records[str(rid)] = r
+                    records[str(rid)] = deepcopy(r)
             elif id_key in r:
-                records[str(r[id_key])] = r
+                records[str(r[id_key])] = deepcopy(r)
         return cls(records=records)
 
 

@@ -59,7 +59,7 @@ def render_junit_report(
             skipped_el = ET.SubElement(
                 testcase,
                 "skipped",
-                {"message": "No toast/DOM signal -- Veritas could not form a claim"},
+                {"message": "Insufficient evidence -- Veritas could not verify this flow"},
             )
             skipped_el.text = inconclusive[0].detail
 

@@ -27,6 +27,7 @@ from browser.agent import BrowserAgent
 from models import FlowResult, Verdict
 from report.html import render_html_report
 from report.junit import render_junit_report
+from report.json_report import render_json_report
 
 __all__ = ["build_arg_parser", "load_config", "build_do", "run_flows", "main"]
 
@@ -51,11 +52,20 @@ def build_do(actions: list[dict[str, Any]]) -> Callable:
                 page.press(spec["selector"], spec["key"])
             elif "check" in step:
                 page.check(step["check"])
+            elif "uncheck" in step:
+                page.uncheck(step["uncheck"])
+            elif "select_option" in step:
+                spec = step["select_option"]
+                page.select_option(spec["selector"], spec["value"])
+            elif "wait_for" in step:
+                spec = step["wait_for"]
+                page.locator(spec["selector"]).wait_for(
+                    state=spec.get("state", "visible"), timeout=spec.get("timeout_ms", 5000))
             elif "wait_ms" in step:
                 page.wait_for_timeout(step["wait_ms"])
             else:
                 raise ValueError(f"action[{i}]: unrecognized step {step!r} "
-                                  f"(expected one of: click, fill, press, check, wait_ms)")
+                                  f"(expected one of: click, fill, press, check, uncheck, select_option, wait_for, wait_ms)")
     return do
 
 
@@ -85,6 +95,8 @@ def run_flows(config: dict[str, Any]) -> list[FlowResult]:
         row_selector=selectors.get("row_selector", ".task"),
         toast_selector=selectors.get("toast_selector", "#toast"),
         id_attr=selectors.get("id_attr", "data-id"),
+        storage_state=config.get("storage_state"),
+        extra_http_headers=config.get("headers", {}),
     ) as agent:
         agent.goto(entry_path)
         for flow in flows:
@@ -95,6 +107,11 @@ def run_flows(config: dict[str, Any]) -> list[FlowResult]:
                     build_do(flow["actions"]),
                     backend_read_path=flow.get("backend_read_path", default_backend_read_path),
                     poll_timeout=flow.get("poll_timeout", default_poll_timeout),
+                    poll_interval=flow.get("poll_interval", config.get("poll_interval", 0.1)),
+                    backend_id_key=config.get("backend_id_key", "id"),
+                    field_name=flow.get("field_name", config.get("field_name")),
+                    forbidden_keys=tuple(config.get("leak_policy", {}).get("forbidden_keys", [])),
+                    allowed_paths=tuple(config.get("leak_policy", {}).get("allowed_paths", [])),
                 )
             )
     return results
@@ -102,13 +119,15 @@ def run_flows(config: dict[str, Any]) -> list[FlowResult]:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="veritas",
+        prog="satya",
         description="Run Veritas verification flows against a running app and "
                      "report whether the UI told the truth about what the backend did.",
     )
     p.add_argument("--config", required=True, help="Path to a flows YAML or JSON file")
     p.add_argument("--html-report", metavar="PATH", help="Write a self-contained HTML report here")
     p.add_argument("--junit-report", metavar="PATH", help="Write a JUnit XML report here (for CI)")
+    p.add_argument("--json-report", metavar="PATH", help="Write machine-readable findings (without raw payloads)")
+    p.add_argument("--fail-on-inconclusive", action="store_true", help="Fail CI when a flow could not be verified")
     p.add_argument("--quiet", action="store_true", help="Only print the final summary line")
     return p
 
@@ -119,13 +138,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_config(args.config)
     except Exception as exc:
-        print(f"veritas: could not load config {args.config!r}: {exc}", file=sys.stderr)
+        print(f"satya: could not load config {args.config!r}: {exc}", file=sys.stderr)
         return 2
 
     try:
         results = run_flows(config)
     except Exception as exc:
-        print(f"veritas: run failed: {exc}", file=sys.stderr)
+        print(f"satya: run failed: {exc}", file=sys.stderr)
         return 2
 
     if not args.quiet:
@@ -149,7 +168,11 @@ def main(argv: list[str] | None = None) -> int:
         path = render_junit_report(results, args.junit_report)
         print(f"JUnit report written to {path}")
 
-    return 1 if summary["problems_found"] > 0 else 0
+    if args.json_report:
+        path = render_json_report(results, args.json_report)
+        print(f"JSON report written to {path}")
+    return 1 if (summary["problems_found"] > 0 or
+                 args.fail_on_inconclusive and summary["inconclusive_found"] > 0) else 0
 
 
 if __name__ == "__main__":

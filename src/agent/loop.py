@@ -11,6 +11,8 @@ For any UI interaction the agent:
 from __future__ import annotations
 
 import time
+import math
+from dataclasses import replace
 from typing import Any, Callable
 
 from agent.claim import BaseClaimInferrer, infer_claim
@@ -32,6 +34,10 @@ def verify_action(
     poll_timeout: float = 0.0,
     poll_interval: float = 0.1,
     inferrer: BaseClaimInferrer | None = None,
+    backend_id_key: str = "id",
+    field_name: str | None = None,
+    forbidden_keys: tuple[str, ...] = (),
+    allowed_paths: tuple[str, ...] = (),
 ) -> FlowResult:
     """
     Run one UI action end-to-end through the verification pipeline.
@@ -45,15 +51,18 @@ def verify_action(
         poll_timeout: Max seconds to wait for backend state to converge (eventual consistency).
         poll_interval: Seconds between polls during eventual consistency window.
         inferrer: Optional custom claim inferrer (e.g. VLMClaimInferrer).
+        backend_id_key: Backend record key corresponding to the UI row ID.
+        field_name: Optional backend field to verify for mutations.
     """
     def _fetch_records() -> list[dict]:
         if backend_fetch_fn is not None:
             return backend_fetch_fn()
         return agent.api_get(backend_read_path)
 
-    before_snap = BackendSnapshot.from_list(_fetch_records())
+    validate_polling(poll_timeout, poll_interval)
+    before_snap = BackendSnapshot.from_list(_fetch_records(), id_key=backend_id_key)
     trace: ActionTrace = agent.act(description, do)
-    after_snap = BackendSnapshot.from_list(_fetch_records())
+    after_snap = BackendSnapshot.from_list(_fetch_records(), id_key=backend_id_key)
 
     claim = infer_claim(
         trace.ui_before,
@@ -64,37 +73,18 @@ def verify_action(
         inferrer=inferrer,
     )
 
+    if field_name is not None:
+        claim = replace(claim, field_name=field_name)
     diff = diff_backend(before_snap, after_snap)
     finding = reconcile(claim, diff, trace)
 
-    # Eventual consistency retry loop:
-    # If the UI asserted a change and a mutating request succeeded (HTTP 2xx),
-    # but the backend hasn't reflected the change yet, poll until it does or timeout expires.
-    mutating_success = any(
-        c.status and 200 <= c.status < 300
-        for c in trace.network_calls
-        if c.method in ("POST", "PUT", "PATCH", "DELETE")
+    finding = poll_for_agreement(
+        claim, trace, before_snap, lambda: BackendSnapshot.from_list(_fetch_records(), id_key=backend_id_key),
+        finding, poll_timeout=poll_timeout, poll_interval=poll_interval,
     )
 
-    if finding.verdict == Verdict.UI_LIED and mutating_success and poll_timeout > 0:
-        start_time = time.monotonic()
-        while (time.monotonic() - start_time) < poll_timeout:
-            time.sleep(poll_interval)
-            after_snap = BackendSnapshot.from_list(_fetch_records())
-            diff = diff_backend(before_snap, after_snap)
-            elapsed = time.monotonic() - start_time
-            retry_finding = reconcile(
-                claim,
-                diff,
-                trace,
-                corroboration_note=f"confirmed after {elapsed:.2f}s eventual consistency window",
-            )
-            if retry_finding.verdict == Verdict.AGREE:
-                finding = retry_finding
-                break
-
     findings = [finding]
-    leak = check_data_leak(trace)
+    leak = check_data_leak(trace, forbidden_keys=forbidden_keys, allowed_paths=allowed_paths)
     if leak:
         findings.append(leak)
 
@@ -130,3 +120,32 @@ def summarize(results: list[FlowResult]) -> dict[str, Any]:
         "inconclusive_found": len(inconclusive),
         "verdicts": [f.verdict.value for f in all_findings],
     }
+
+
+def validate_polling(timeout: float, interval: float) -> None:
+    if not math.isfinite(timeout) or timeout < 0:
+        raise ValueError("poll_timeout must be finite and non-negative")
+    if not math.isfinite(interval) or interval <= 0:
+        raise ValueError("poll_interval must be finite and positive")
+
+
+def poll_for_agreement(claim, trace, before_snap, fetch_snapshot, finding, *,
+                       poll_timeout=0.0, poll_interval=0.1):
+    """Shared bounded polling for browser flows and passive audits, including WS sends."""
+    validate_polling(poll_timeout, poll_interval)
+    sent = any(c.method == "WS_SEND" or (
+        c.method in ("POST", "PUT", "PATCH", "DELETE") and
+        c.status is not None and 200 <= c.status < 300
+    ) for c in trace.network_calls)
+    if finding.verdict != Verdict.UI_LIED or not sent or poll_timeout == 0:
+        return finding
+    start = time.monotonic()
+    deadline = start + poll_timeout
+    while time.monotonic() < deadline:
+        time.sleep(min(poll_interval, max(0, deadline - time.monotonic())))
+        diff = diff_backend(before_snap, fetch_snapshot())
+        finding = reconcile(claim, diff, trace, corroboration_note=
+                            f"confirmed after {time.monotonic() - start:.2f}s eventual consistency window")
+        if finding.verdict == Verdict.AGREE:
+            break
+    return finding

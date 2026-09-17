@@ -1,6 +1,6 @@
-# Veritas
+# Satya
 
-An agent that catches the class of frontend bug visual testing structurally cannot: where
+Satya is an agent that catches the class of frontend bug visual testing structurally cannot: where
 the UI *looks* correct but **lies about what the backend actually did**.
 
 A delete button that removes the row and flashes "Deleted!" — but never calls the API, so
@@ -21,7 +21,7 @@ them by acting on the UI and then checking the UI's *claim* against the backend'
 pip install -r requirements.txt
 playwright install chromium
 python scripts/run_demo.py     # boots two buggy demo apps, runs the agent against both
-pytest tests/                  # 57 unit tests, no browser required
+pytest tests/                  # unit tests, no browser required
 ```
 
 `scripts/run_demo.py` starts the task-manager demo app (three deliberate, hidden bugs) and a
@@ -206,7 +206,7 @@ Worth being precise about, since the claims above are easy to over-read:
 | `NO_REQUEST` | The UI claimed an action succeeded but no state-changing request was ever sent. |
 | `BACKEND_ERROR` | A request fired but the backend rejected it, while the UI showed success. |
 | `DATA_LEAK` | The backend response carried a field the UI never displays. |
-| `NO_CLAIM` | No toast and no DOM delta at all — Veritas had no signal to reason about. **Not** the same as `AGREE`: it's a coverage gap, not a clean bill of health, and the CLI's exit code (and the JUnit report's `<skipped>`) treat it that way rather than folding it into "problems found." |
+| `NO_CLAIM` | Insufficient evidence to verify the effect, including missing targets or values, ambiguous multi-row changes, or no toast and no DOM delta at all — Veritas had no signal to reason about. **Not** the same as `AGREE`: it's a coverage gap, not a clean bill of health, and the CLI's exit code (and the JUnit report's `<skipped>`) treat it that way rather than folding it into "problems found." |
 
 ## Repo layout
 
@@ -222,7 +222,7 @@ src/
   agent/          claim inference (claim.py with Heuristic + VLM) + loop (loop.py)
   reconcile/      backend snapshot/diff (backend.py) + claim-driven reconciler (reconciler.py)
   report/         HTML report (html.py) and JUnit XML report (junit.py) generators
-tests/            pytest suite (57 tests: claims, VLM, reconciler, auditor, eventual consistency,
+tests/            pytest suite (tests: claims, VLM, reconciler, auditor, eventual consistency,
                   WebSocket frames, CLI, both report formats, both demo apps) — no browser needed
 scripts/
   run_demo.py       one-command end-to-end demo against both apps + HTML report
@@ -285,3 +285,58 @@ internal fields to recipients. Veritas is that manual QA work turned into an aut
 it performs the flow, reads what the UI claims, independently verifies against the backend,
 and reports the mismatch.
 
+
+
+## Stricter verification and CI output
+
+Creation checks now require the identified UI record to appear in the backend additions.
+A success toast with no identifiable mutation target or expected value is `NO_CLAIM`,
+rather than a confirmed save. Multi-row changes are also inconclusive: the current claim
+model represents one record, and does not arbitrarily select one row from a bulk operation.
+
+For edits, configure `field_name` to bind the displayed value to a specific backend field.
+Without this option, the legacy comparison still accepts a matching value in any changed
+field on the target record. Record IDs must correspond between the UI and backend; temporary
+client IDs are not automatically mapped to server IDs. These checks compare changes, so an
+idempotent save with no observable change may remain inconclusive.
+
+```yaml
+base_url: http://localhost:8000
+backend_read_path: /api/items
+backend_id_key: uuid
+poll_timeout: 2.0
+poll_interval: 0.1
+selectors:
+  row_selector: '.item'
+  id_attr: data-id
+  toast_selector: '[role=status]'
+flows:
+  - description: Edit item title
+    field_name: title
+    actions:
+      - fill: {selector: '#title', value: 'Revised title'}
+      - click: '#save'
+      - wait_for: {selector: '[role=status]', state: visible, timeout_ms: 5000}
+```
+
+Additional actions include `uncheck: '#done'` and
+`select_option: {selector: '#status', value: done}`. `wait_for` waits for a selector state
+(`visible`, `hidden`, `attached`, or `detached`) with an explicit timeout.
+
+```bash
+python scripts/veritas_cli.py --config flows.yaml \
+  --fail-on-inconclusive --json-report results.json --junit-report results.xml
+```
+
+`--fail-on-inconclusive` makes `NO_CLAIM` produce exit code 1, as discrepancies already do.
+Without it, inconclusive flows retain their previous non-failing behavior. JSON output has
+`schema_version`, `summary`, and per-flow `findings`; it excludes raw network bodies and
+screenshots, but claim evidence can still contain displayed values.
+
+`VeritasAuditor` now implements `poll_timeout`, supports `poll_interval`, `backend_id_key`,
+and `field_name`, and shares the polling logic used by `verify_action`. The shared poller
+also handles captured WebSocket sends in `BrowserAgent`; the passive auditor still captures
+HTTP only. A missing backend reader is inconclusive, never proof of persistence.
+Use `auditor.assert_truthful(fail_on_inconclusive=True)` to enforce strict coverage.
+Backend snapshots deep-copy records so an in-place change in a custom reader cannot erase
+the original state before comparison.

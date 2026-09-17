@@ -12,6 +12,9 @@ base_url: "http://127.0.0.1:8077"
 entry_path: "/?bugs=on"
 backend_read_path: "/api/tasks?bugs=off"
 headless: true
+backend_id_key: id
+poll_timeout: 2.0
+poll_interval: 0.1
 
 selectors:
   row_selector: ".task"
@@ -24,6 +27,7 @@ flows:
       - click: '.del[data-id="1"]'
 
   - description: 'edit task 2 title to "Review PR #42 (updated)" and Save'
+    field_name: title
     actions:
       - fill:
           selector: 'input[data-id="2"]'
