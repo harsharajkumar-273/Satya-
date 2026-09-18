@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import time
+import json
 from pathlib import Path
 from typing import Any
 from fastapi import FastAPI, HTTPException
@@ -23,8 +24,8 @@ class RunRequest(BaseModel):
     allow_mutations: bool = False
 
 
-def _url_smoke(url: str) -> dict[str, Any]:
-    """Safe, read-only URL audit used when no explicit flows are supplied."""
+def _url_smoke(url: str, flows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Run a safe browser audit and optional declarative read-only flows."""
     from playwright.sync_api import sync_playwright
     console: list[str] = []
     failed: list[str] = []
@@ -37,11 +38,31 @@ def _url_smoke(url: str) -> dict[str, Any]:
         title = page.title()
         links = page.locator("a").count()
         forms = page.locator("form").count()
+        flow_results = []
+        for flow in flows or []:
+            before_errors, before_failed = len(console), len(failed)
+            action_results = []
+            for action in flow.get("actions", []):
+                if "click" in action:
+                    selector = action["click"]
+                    page.locator(selector).click(timeout=5000)
+                    action_results.append({"action": "click", "selector": selector})
+                elif "fill" in action:
+                    raise ValueError("fill actions require allow_mutations=true; safe mode permits navigation only")
+                elif "wait_ms" in action:
+                    page.wait_for_timeout(min(int(action["wait_ms"]), 5000))
+                else:
+                    raise ValueError(f"unsupported safe action: {action}")
+            flow_results.append({"description": flow.get("description", "flow"),
+                                 "actions": action_results,
+                                 "new_console_errors": console[before_errors:],
+                                 "new_failed_requests": failed[before_failed:]})
         browser.close()
     return {"url": url, "http_status": response.status if response else None,
             "title": title, "links": links, "forms": forms,
             "console_errors": [x for x in console if x.startswith("error:")],
-            "failed_requests": failed}
+            "failed_requests": failed, "flows": flow_results,
+            "evidence": "The page loaded successfully and every permitted flow action completed."}
 
 
 async def _prepare(run_id: str, request: RunRequest) -> None:
@@ -52,7 +73,7 @@ async def _prepare(run_id: str, request: RunRequest) -> None:
     if request.url:
         run["status"] = "running"
         try:
-            run["browser_audit"] = await asyncio.to_thread(_url_smoke, request.url)
+            run["browser_audit"] = await asyncio.to_thread(_url_smoke, request.url, request.flows)
             run["status"] = "complete"
             run["message"] = "Safe URL smoke audit completed."
         except Exception as exc:

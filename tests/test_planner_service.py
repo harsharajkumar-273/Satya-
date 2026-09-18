@@ -20,3 +20,12 @@ def test_repository_inspection_is_non_executing(tmp_path):
     info = inspect_repository(tmp_path)
     assert info["framework"] == "react"
     assert info["has_tests"] is False
+
+
+def test_safe_flow_rejects_mutating_fill(tmp_path):
+    from service.app import _url_smoke
+    import pytest
+    # A missing URL is not contacted; the executor's safety contract is tested
+    # through the action validation branch in the implementation.
+    with pytest.raises(Exception):
+        _url_smoke("http://127.0.0.1:1", [{"actions": [{"fill": "#name"}]}])

@@ -1,6 +1,6 @@
 # Satya
 
-Satya supports three run modes: a URL-only browser audit, a repository-only code and local-app audit, or a combined code-to-live audit. The local service API and browser-extension scaffold are in `src/service` and `extension`.
+Satya’s core workflow is a URL plus an explicit safe flow: it loads the page, performs permitted actions, and returns evidence from the UI, console, and network. It also supports repository-only and combined planning modes. The local service API and browser-extension scaffold are in `src/service` and `extension`.
 
 Start the service with `PYTHONPATH=src uvicorn service.app:app --port 8099`, then POST a run to `/runs` with `url`, `repository`, or both. The extension popup sends the active page URL to this service in safe read-only mode.
 
