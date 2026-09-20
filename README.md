@@ -2,6 +2,8 @@
 
 Satya’s core workflow is a URL plus an explicit safe flow: it loads the page, performs permitted actions, and returns evidence from the UI, console, and network. It also supports repository-only and combined planning modes. The local service API and browser-extension scaffold are in `src/service` and `extension`.
 
+The service persists run lifecycle and evidence in SQLite (`SATYA_DB_PATH` can select a different database), enforces optional domain allowlists, and keeps browser execution outside the request handler. This gives the project a durable SDE foundation while retaining a simple local setup. Set `allow_mutations: true` only for a deliberately controlled test environment.
+
 Start the service with `PYTHONPATH=src uvicorn service.app:app --port 8099`, then POST a run to `/runs` with `url`, `repository`, or both. The extension popup sends the active page URL to this service in safe read-only mode.
 
 Satya is an agent that catches the class of frontend bug visual testing structurally cannot: where

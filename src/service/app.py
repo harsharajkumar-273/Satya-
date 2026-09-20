@@ -4,15 +4,17 @@ import asyncio
 import secrets
 import time
 import json
+import os
 from pathlib import Path
 from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from planner import plan_run, inspect_repository
+from storage import RunStore
 
 app = FastAPI(title="Satya QA Service")
-RUNS: dict[str, dict[str, Any]] = {}
+STORE = RunStore(os.getenv("SATYA_DB_PATH"))
 STATIC_DIR = Path(__file__).with_name("static")
 
 
@@ -22,6 +24,8 @@ class RunRequest(BaseModel):
     branch: str | None = None
     flows: list[dict[str, Any]] = Field(default_factory=list)
     allow_mutations: bool = False
+    allowed_domains: list[str] = Field(default_factory=list)
+    api_filters: list[str] = Field(default_factory=lambda: ["/api/", "/graphql"])
 
 
 def _url_smoke(url: str, flows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -66,22 +70,24 @@ def _url_smoke(url: str, flows: list[dict[str, Any]] | None = None) -> dict[str,
 
 
 async def _prepare(run_id: str, request: RunRequest) -> None:
-    run = RUNS[run_id]
-    run["status"] = "inspecting"
+    STORE.update(run_id, status="inspecting")
     if request.repository and Path(request.repository).is_dir():
-        run["repository_inspection"] = inspect_repository(request.repository)
+        STORE.update(run_id, repository_inspection=inspect_repository(request.repository))
     if request.url:
-        run["status"] = "running"
+        STORE.update(run_id, status="running")
         try:
-            run["browser_audit"] = await asyncio.to_thread(_url_smoke, request.url, request.flows)
-            run["status"] = "complete"
-            run["message"] = "Safe URL smoke audit completed."
+            from urllib.parse import urlparse
+            domain = urlparse(request.url).hostname
+            if request.allowed_domains and domain not in request.allowed_domains:
+                raise ValueError(f"target domain {domain!r} is not in allowed_domains")
+            audit = await asyncio.to_thread(_url_smoke, request.url, request.flows)
+            STORE.update(run_id, browser_audit=audit, status="complete",
+                         message="Safe URL workflow audit completed.")
         except Exception as exc:
-            run["status"] = "failed"
-            run["message"] = f"URL audit failed: {exc}"
+            STORE.update(run_id, status="failed", message=f"URL audit failed: {exc}")
     else:
-        run["status"] = "ready"
-        run["message"] = "Repository inspected; local executor is ready for an explicit run."
+        STORE.update(run_id, status="ready",
+                     message="Repository inspected; local executor is ready for an explicit run.")
 
 
 @app.post("/runs", status_code=202)
@@ -92,18 +98,21 @@ async def create_run(request: RunRequest):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     run_id = secrets.token_urlsafe(12)
-    RUNS[run_id] = {"id": run_id, "status": "queued", "created_at": time.time(),
+    run = {"id": run_id, "status": "queued", "created_at": time.time(),
                     "mode": plan.mode.value, "url": plan.url, "repository": plan.repository,
-                    "branch": plan.branch, "safe_only": plan.safe_only, "flows": request.flows}
+                    "branch": plan.branch, "safe_only": plan.safe_only, "flows": request.flows,
+                    "allowed_domains": request.allowed_domains}
+    STORE.create(run)
     asyncio.create_task(_prepare(run_id, request))
     return RUNS[run_id]
 
 
 @app.get("/runs/{run_id}")
 async def get_run(run_id: str):
-    if run_id not in RUNS:
+    run = STORE.get(run_id)
+    if run is None:
         raise HTTPException(404, "run not found")
-    return RUNS[run_id]
+    return run
 
 
 @app.get("/health")

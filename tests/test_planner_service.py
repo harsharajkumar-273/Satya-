@@ -23,8 +23,9 @@ def test_repository_inspection_is_non_executing(tmp_path):
 
 
 def test_safe_flow_rejects_mutating_fill(tmp_path):
-    from service.app import _url_smoke
     import pytest
+    pytest.importorskip("fastapi")
+    from service.app import _url_smoke
     # A missing URL is not contacted; the executor's safety contract is tested
     # through the action validation branch in the implementation.
     with pytest.raises(Exception):
