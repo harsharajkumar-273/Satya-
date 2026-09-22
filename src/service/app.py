@@ -26,6 +26,9 @@ class RunRequest(BaseModel):
     allow_mutations: bool = False
     allowed_domains: list[str] = Field(default_factory=list)
     api_filters: list[str] = Field(default_factory=lambda: ["/api/", "/graphql"])
+    # How to find rows/toasts on the target page for truthfulness checks
+    # (row_selector, toast_selector, id_attr). Same keys as the CLI config.
+    selectors: dict[str, str] = Field(default_factory=dict)
 
 
 def _url_smoke(url: str, flows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -66,7 +69,59 @@ def _url_smoke(url: str, flows: list[dict[str, Any]] | None = None) -> dict[str,
             "title": title, "links": links, "forms": forms,
             "console_errors": [x for x in console if x.startswith("error:")],
             "failed_requests": failed, "flows": flow_results,
-            "evidence": "The page loaded successfully and every permitted flow action completed."}
+            "check": "smoke",
+            "evidence": ("Smoke check only: the page loaded and every permitted read-only action "
+                         "completed. This mode does not verify what the UI claims against persisted "
+                         "state -- run with allow_mutations, flows, and allowed_domains against a "
+                         "test environment for a truthfulness check.")}
+
+
+def _url_verify(url: str, flows: list[dict[str, Any]], selectors: dict[str, str],
+                api_filters: list[str]) -> dict[str, Any]:
+    """
+    Truthfulness check for a URL Satya has no backend access to.
+
+    Runs each flow through the same claim-inference + reconciliation engine as
+    the CLI, with reload-persistence ground truth: the page is reloaded before
+    and after every action and the re-rendered rows are treated as the truth.
+    A delete that comes back, or a save that reverts, is caught -- on any app,
+    not just ones that expose a readable API. Performs real mutations, which is
+    why it's gated behind allow_mutations + an explicit allowed_domains list.
+    """
+    from urllib.parse import urlsplit
+    from agent.loop import safe_verify_action, summarize
+    from browser.agent import BrowserAgent
+    from cli import build_do
+
+    parts = urlsplit(url)
+    base = f"{parts.scheme}://{parts.netloc}"
+    path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    results = []
+    with BrowserAgent(
+        base,
+        row_selector=selectors.get("row_selector", "[data-id]"),
+        toast_selector=selectors.get("toast_selector", "[role=status], [role=alert], .toast, #toast"),
+        id_attr=selectors.get("id_attr", "data-id"),
+        api_filter=tuple(api_filters),
+        include_row_state=True,
+    ) as agent:
+        agent.goto(path)
+        for flow in flows:
+            results.append(safe_verify_action(agent, flow.get("description", "flow"),
+                                              build_do(flow["actions"]), ground_truth="reload"))
+    return {
+        "url": url,
+        "check": "truthfulness",
+        "ground_truth": "page reload",
+        "summary": summarize(results),
+        "flows": [{
+            "description": r.flow,
+            "claim_evidence": r.claim_evidence,
+            "findings": [{"verdict": f.verdict.value, "summary": f.summary, "detail": f.detail}
+                         for f in r.findings],
+            "network": [f"{c.method} {c.url} -> {c.status}" for c in r.trace.network_calls],
+        } for r in results],
+    }
 
 
 async def _prepare(run_id: str, request: RunRequest) -> None:
@@ -80,9 +135,16 @@ async def _prepare(run_id: str, request: RunRequest) -> None:
             domain = urlparse(request.url).hostname
             if request.allowed_domains and domain not in request.allowed_domains:
                 raise ValueError(f"target domain {domain!r} is not in allowed_domains")
-            audit = await asyncio.to_thread(_url_smoke, request.url, request.flows)
-            STORE.update(run_id, browser_audit=audit, status="complete",
-                         message="Safe URL workflow audit completed.")
+            if request.allow_mutations:
+                audit = await asyncio.to_thread(_url_verify, request.url, request.flows,
+                                                request.selectors, request.api_filters)
+                problems = audit["summary"]["problems_found"]
+                STORE.update(run_id, truthfulness_audit=audit, status="complete",
+                             message=f"Truthfulness check completed: {problems} problem(s) found.")
+            else:
+                audit = await asyncio.to_thread(_url_smoke, request.url, request.flows)
+                STORE.update(run_id, browser_audit=audit, status="complete",
+                             message="Smoke check completed (read-only; no truthfulness verification).")
         except Exception as exc:
             STORE.update(run_id, status="failed", message=f"URL audit failed: {exc}")
     else:
@@ -97,11 +159,22 @@ async def create_run(request: RunRequest):
                         branch=request.branch, allow_mutations=request.allow_mutations)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    if request.url and request.allow_mutations:
+        # Truthfulness checks perform real creates/edits/deletes. Deny by default:
+        # the caller must name the domain(s) it's allowed to mutate, so nothing
+        # (e.g. a browser extension on an arbitrary tab) can point this at a
+        # production site by accident.
+        if not request.allowed_domains:
+            raise HTTPException(400, "allow_mutations requires an explicit allowed_domains list")
+        if not request.flows:
+            raise HTTPException(400, "a truthfulness check needs at least one flow to perform")
     run_id = secrets.token_urlsafe(12)
     run = {"id": run_id, "status": "queued", "created_at": time.time(),
                     "mode": plan.mode.value, "url": plan.url, "repository": plan.repository,
                     "branch": plan.branch, "safe_only": plan.safe_only, "flows": request.flows,
-                    "allowed_domains": request.allowed_domains}
+                    "allowed_domains": request.allowed_domains,
+                    "check": ("truthfulness" if request.url and request.allow_mutations
+                              else "smoke" if request.url else None)}
     STORE.create(run)
     asyncio.create_task(_prepare(run_id, request))
     return run

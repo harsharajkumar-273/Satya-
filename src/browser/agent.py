@@ -88,6 +88,8 @@ class BrowserAgent:
         storage_state: str | dict | None = None,
         extra_http_headers: dict[str, str] | None = None,
         api_filter: str | tuple[str, ...] = "/api/",
+        include_row_state: bool = False,
+        action_timeout_ms: int = 10000,
     ):
         if sync_playwright is None:
             raise ImportError(
@@ -103,6 +105,13 @@ class BrowserAgent:
         self.storage_state = storage_state
         self.extra_http_headers = extra_http_headers or {}
         self.api_filter = (api_filter,) if isinstance(api_filter, str) else tuple(api_filter)
+        # When True, a row's value also encodes its checkbox/radio state ("[x]"/"[ ]"),
+        # so toggles like "mark complete" -- which change no visible text -- still
+        # produce a DOM delta and a verifiable claim. Off by default because in API
+        # ground-truth mode the row value is compared against a backend field, which
+        # won't carry the marker; reload mode compares like with like, so it's on there.
+        self.include_row_state = include_row_state
+        self.action_timeout_ms = action_timeout_ms
         self._active_action_id: str | None = None
         self._captured: list[NetworkCall] = []
 
@@ -111,6 +120,8 @@ class BrowserAgent:
         self._browser = self._pw.chromium.launch(headless=self._headless)
         self._page = self._browser.new_page(viewport=self._size, storage_state=self.storage_state,
                                             extra_http_headers=self.extra_http_headers)
+        # A flow step that can't find its element should fail in seconds, not 30s.
+        self._page.set_default_timeout(self.action_timeout_ms)
         self._wire_network_capture()
         self._wire_websocket_capture()
         return self
@@ -180,8 +191,51 @@ class BrowserAgent:
 
     def goto(self, path: str = "/"):
         self._page.goto(self.base_url + path)
-        self._page.wait_for_timeout(300)
+        self._settle()
         self._captured.clear()  # drop the initial page-load traffic; we only want per-action calls
+
+    def _settle(self, max_ms: int = 4000, stable_reads: int = 2, interval_ms: int = 150) -> None:
+        """
+        Wait until the page has actually finished rendering its rows, instead of
+        sleeping a fixed amount. Found the hard way during third-party validation
+        (docs/VALIDATION.md): TodoMVC's Sammy.js build fetches its row templates
+        over XHR after load, so a fixed 300ms wait sometimes read the list before
+        it existed -- which reload ground truth then reported as "your change
+        didn't persist", a false positive. Waits for network idle, then for the
+        row snapshot to stop changing across `stable_reads` consecutive reads.
+        """
+        try:
+            self._page.wait_for_load_state("networkidle", timeout=max_ms)
+        except Exception:
+            pass  # long-polling / websocket apps never go idle; fall through to DOM stability
+        deadline = time.monotonic() + max_ms / 1000
+        last, same = None, 0
+        while time.monotonic() < deadline:
+            current = self._row_values()
+            same = same + 1 if current == last else 0
+            if same >= stable_reads - 1 and last is not None:
+                return
+            last = current
+            self._page.wait_for_timeout(interval_ms)
+
+    def reload(self):
+        """Full page reload, discarding any client-only state the last action left behind."""
+        self._page.reload()
+        self._settle()
+        self._captured.clear()
+
+    def persisted_records(self) -> list[dict]:
+        """
+        Black-box ground truth: reload the page and read the rows back exactly
+        as the app re-renders them from whatever it actually persisted (server,
+        localStorage, IndexedDB...). A fake delete comes back; a fake save shows
+        the old value. Needs no backend access, so it works on apps you didn't
+        write -- which is what makes Satya's URL mode a real truthfulness check
+        rather than a page smoke test. Records are {"id": <row id>, "value":
+        <row text / input value>}, i.e. the same shape verify_action diffs.
+        """
+        self.reload()
+        return [{"id": rid, "value": value} for rid, value in self._row_values().items()]
 
     def api_get(self, path: str):
         """Independent backend read — the 'ground truth' side of reconciliation."""
@@ -203,7 +257,12 @@ class BrowserAgent:
             f"""els => Object.fromEntries(els.map(el => {{
                 const id = el.getAttribute('{self.id_attr}') || el.id || '';
                 const inp = el.querySelector('input[type=text], textarea');
-                return [id, inp ? inp.value : el.textContent.trim()];
+                let value = inp ? inp.value : el.textContent.trim();
+                if ({'true' if self.include_row_state else 'false'}) {{
+                    const boxes = [...el.querySelectorAll('input[type=checkbox], input[type=radio]')];
+                    if (boxes.length) value += ' ' + boxes.map(b => b.checked ? '[x]' : '[ ]').join('');
+                }}
+                return [id, value];
             }}).filter(([id]) => Boolean(id)))""",
         )
 

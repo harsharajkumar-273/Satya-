@@ -14,7 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from cli import build_arg_parser, build_do, load_config, main
-from models import ActionTrace, Finding, FlowResult, Verdict
+from models import ActionTrace, Finding, FlowResult, UISnapshot, Verdict
 
 
 # --- load_config ----------------------------------------------------------
@@ -113,3 +113,65 @@ def test_arg_parser_requires_config():
     parser = build_arg_parser()
     with pytest.raises(SystemExit):
         parser.parse_args([])
+
+
+def test_run_flows_passes_ground_truth_through(tmp_path):
+    """ground_truth: reload in the config must reach verify_action (flow-level overrides global)."""
+    from unittest.mock import MagicMock
+    import cli
+    config = {"base_url": "http://x", "ground_truth": "reload",
+              "flows": [{"description": "a", "actions": []},
+                        {"description": "b", "actions": [], "ground_truth": "api"}]}
+    fake_agent = MagicMock()
+    fake_agent.__enter__ = MagicMock(return_value=fake_agent)
+    fake_agent.__exit__ = MagicMock(return_value=False)
+    with patch("cli.BrowserAgent", return_value=fake_agent), \
+         patch("cli.safe_verify_action") as mock_verify:
+        cli.run_flows(config)
+    modes = [c.kwargs["ground_truth"] for c in mock_verify.call_args_list]
+    assert modes == ["reload", "api"]
+
+
+def test_build_do_dispatches_hover_and_dblclick():
+    page = MagicMock()
+    build_do([{"hover": "li"}, {"dblclick": "label"}])(page)
+    page.hover.assert_called_once_with("li")
+    page.dblclick.assert_called_once_with("label")
+
+
+def test_reload_mode_turns_on_row_state_capture_by_default():
+    """Reload mode compares rendered rows with rendered rows, so it's safe (and
+    necessary for checkbox toggles) to encode checkbox state in row values."""
+    import cli
+    for cfg, expected in (({"ground_truth": "reload"}, True), ({}, False),
+                          ({"ground_truth": "reload", "include_row_state": False}, False)):
+        fake_agent = MagicMock()
+        fake_agent.__enter__ = MagicMock(return_value=fake_agent)
+        fake_agent.__exit__ = MagicMock(return_value=False)
+        config = dict(cfg, base_url="http://x", flows=[{"description": "a", "actions": []}])
+        with patch("cli.BrowserAgent", return_value=fake_agent) as mock_agent, \
+             patch("cli.safe_verify_action"):
+            cli.run_flows(config)
+        assert mock_agent.call_args.kwargs["include_row_state"] is expected
+
+
+def test_one_broken_flow_does_not_abort_the_rest():
+    """Before: a single selector timeout killed the whole run (exit 2, no report).
+    Now it's an ACTION_FAILED result and the remaining flows still run."""
+    import cli
+    from models import Verdict
+    config = {"base_url": "http://x", "flows": [
+        {"description": "broken", "actions": [{"click": "#nope"}]},
+        {"description": "fine", "actions": []}]}
+    fake_agent = MagicMock()
+    fake_agent.__enter__ = MagicMock(return_value=fake_agent)
+    fake_agent.__exit__ = MagicMock(return_value=False)
+    fake_agent.act.side_effect = [TimeoutError("Page.click: Timeout"),
+                                  ActionTrace("fine", b"", b"", None, 0, 0,
+                                              ui_before=UISnapshot(None, 0), ui_after=UISnapshot(None, 0))]
+    fake_agent.api_get.return_value = []
+    with patch("cli.BrowserAgent", return_value=fake_agent):
+        results = cli.run_flows(config)
+    assert [r.flow for r in results] == ["broken", "fine"]
+    assert results[0].findings[0].verdict == Verdict.ACTION_FAILED
+    assert results[1].findings[0].verdict != Verdict.ACTION_FAILED

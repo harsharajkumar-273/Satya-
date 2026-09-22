@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from agent.loop import summarize, verify_action
+from agent.loop import safe_verify_action, summarize, verify_action
 from browser.agent import BrowserAgent
 from models import FlowResult, Verdict
 from report.html import render_html_report
@@ -44,6 +44,11 @@ def build_do(actions: list[dict[str, Any]]) -> Callable:
         for i, step in enumerate(actions):
             if "click" in step:
                 page.click(step["click"])
+            elif "dblclick" in step:
+                page.dblclick(step["dblclick"])
+            elif "hover" in step:
+                # e.g. TodoMVC-style delete buttons that only become visible on :hover
+                page.hover(step["hover"])
             elif "fill" in step:
                 spec = step["fill"]
                 page.fill(spec["selector"], spec["value"])
@@ -65,7 +70,7 @@ def build_do(actions: list[dict[str, Any]]) -> Callable:
                 page.wait_for_timeout(step["wait_ms"])
             else:
                 raise ValueError(f"action[{i}]: unrecognized step {step!r} "
-                                  f"(expected one of: click, fill, press, check, uncheck, select_option, wait_for, wait_ms)")
+                                  f"(expected one of: click, dblclick, hover, fill, press, check, uncheck, select_option, wait_for, wait_ms)")
     return do
 
 
@@ -98,11 +103,13 @@ def run_flows(config: dict[str, Any]) -> list[FlowResult]:
         storage_state=config.get("storage_state"),
         extra_http_headers=config.get("headers", {}),
         api_filter=tuple(config.get("api_filters", ["/api/", "/graphql"])),
+        include_row_state=config.get("include_row_state", config.get("ground_truth") == "reload"),
+        action_timeout_ms=config.get("action_timeout_ms", 10000),
     ) as agent:
         agent.goto(entry_path)
         for flow in flows:
             results.append(
-                verify_action(
+                safe_verify_action(
                     agent,
                     flow["description"],
                     build_do(flow["actions"]),
@@ -113,6 +120,7 @@ def run_flows(config: dict[str, Any]) -> list[FlowResult]:
                     field_name=flow.get("field_name", config.get("field_name")),
                     forbidden_keys=tuple(config.get("leak_policy", {}).get("forbidden_keys", [])),
                     allowed_paths=tuple(config.get("leak_policy", {}).get("allowed_paths", [])),
+                    ground_truth=flow.get("ground_truth", config.get("ground_truth", "api")),
                 )
             )
     return results

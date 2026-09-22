@@ -28,6 +28,10 @@ class Verdict(str, Enum):
     DATA_LEAK = "DATA_LEAK"           # backend returned fields the UI shouldn't have received
     NO_CLAIM = "NO_CLAIM"             # no toast and no DOM delta at all — nothing to reason about,
                                        # NOT the same as a verified-clean AGREE (see reconcile())
+    UNSTABLE_RENDER = "UNSTABLE_RENDER"  # reload ground truth: the page rendered *different* persisted
+                                         # state on consecutive reloads -- data exists but doesn't reliably show
+    ACTION_FAILED = "ACTION_FAILED"   # the flow's own actions couldn't be performed (e.g. selector timed
+                                       # out), so nothing was verified -- inconclusive, not a verdict on the app
 
 
 @dataclass

@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from agent.loop import HARD_FAILURE_VERDICTS
+from agent.loop import HARD_FAILURE_VERDICTS, INCONCLUSIVE_VERDICTS
 from models import FlowResult, Verdict
 
 
@@ -35,7 +35,7 @@ def render_junit_report(
 
     for result in results:
         hard = [f for f in result.findings if f.verdict in HARD_FAILURE_VERDICTS]
-        inconclusive = [f for f in result.findings if f.verdict == Verdict.NO_CLAIM]
+        inconclusive = [f for f in result.findings if f.verdict in INCONCLUSIVE_VERDICTS]
 
         testcase = ET.SubElement(
             testsuite,
@@ -59,7 +59,7 @@ def render_junit_report(
             skipped_el = ET.SubElement(
                 testcase,
                 "skipped",
-                {"message": "Insufficient evidence -- Veritas could not verify this flow"},
+                {"message": f"Inconclusive ({inconclusive[0].verdict.value}): {inconclusive[0].summary}"},
             )
             skipped_el.text = inconclusive[0].detail
 

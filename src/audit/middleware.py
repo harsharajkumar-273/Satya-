@@ -17,7 +17,7 @@ from __future__ import annotations
 import contextlib
 import json
 from dataclasses import replace
-from agent.loop import HARD_FAILURE_VERDICTS, poll_for_agreement, validate_polling
+from agent.loop import HARD_FAILURE_VERDICTS, INCONCLUSIVE_VERDICTS, poll_for_agreement, validate_polling
 from typing import Any, Callable
 
 from agent.claim import BaseClaimInferrer, infer_claim
@@ -251,7 +251,7 @@ class VeritasAuditor:
         problems: list[Finding] = []
         for res in self.results:
             for f in res.findings:
-                if f.verdict in HARD_FAILURE_VERDICTS or (fail_on_inconclusive and f.verdict == Verdict.NO_CLAIM):
+                if f.verdict in HARD_FAILURE_VERDICTS or (fail_on_inconclusive and f.verdict in INCONCLUSIVE_VERDICTS):
                     problems.append(f)
         return problems
 

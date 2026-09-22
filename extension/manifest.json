@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Satya QA",
   "version": "0.1.0",
-  "description": "Send the current page to a local Satya QA service.",
+  "description": "Send the current page to a local Satya QA service for a read-only smoke check.",
   "permissions": ["activeTab", "storage"],
   "action": {"default_popup": "popup.html"}
 }

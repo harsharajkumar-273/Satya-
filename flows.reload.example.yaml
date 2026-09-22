@@ -1,0 +1,30 @@
+# Black-box truthfulness check: no backend_read_path needed.
+#
+# ground_truth: reload tells Satya to reload the page before and after every
+# action and treat the re-rendered rows as the truth. Use this for apps you
+# don't have backend/API read access to. It performs the actions for real, so
+# point it at a test or staging environment.
+#
+#   python scripts/satya.py --config flows.reload.example.yaml --html-report report.html
+
+base_url: "http://127.0.0.1:8077"
+entry_path: "/?bugs=on"
+ground_truth: reload
+headless: true
+
+selectors:
+  row_selector: ".task"
+  toast_selector: "#toast"
+  id_attr: "data-id"
+
+flows:
+  - description: "click Delete on task 1"
+    actions:
+      - click: '.del[data-id="1"]'
+
+  - description: 'edit task 2 title and Save'
+    actions:
+      - fill:
+          selector: 'input[data-id="2"]'
+          value: "Review PR #42 (updated)"
+      - click: '.save[data-id="2"]'

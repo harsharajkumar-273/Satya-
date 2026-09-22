@@ -1,8 +1,93 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Satya QA</title>
-<style>body{font:16px system-ui;margin:0;background:#f5f7fb;color:#172033}.shell{max-width:900px;margin:auto;padding:40px 22px}.brand{display:flex;gap:12px;align-items:center;margin-bottom:35px}.mark{background:#3b5ccc;color:white;border-radius:12px;padding:8px 14px;font-size:24px;font-weight:800}.card{background:white;border:1px solid #e2e7f0;border-radius:16px;padding:25px;margin-bottom:20px;box-shadow:0 5px 20px #1720330d}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.label{display:block;font-weight:700;font-size:13px;margin:14px 0 6px}input{width:100%;padding:12px;border:1px solid #ccd5e5;border-radius:9px;font:inherit}button{background:#3b5ccc;color:white;border:0;border-radius:9px;padding:12px 16px;font-weight:700;margin-top:18px;cursor:pointer}.status{background:#eef2ff;padding:12px;border-radius:9px;margin-top:18px}.mode{background:#f7f8fc;padding:12px;border-radius:9px;margin:10px 0}.muted{color:#71809a}@media(max-width:700px){.grid{grid-template-columns:1fr}}</style></head>
-<body><main class="shell"><header class="brand"><div class="mark">S</div><div><h1>Satya QA</h1><div class="muted">Verify what interfaces promise against what systems do.</div></div></header>
-<section class="grid"><div class="card"><h2>Start a truthfulness audit</h2><p class="muted">Give Satya a website, repository, or both. Safe mode is enabled by default.</p><form id="form"><label class="label">Website URL</label><input id="url" type="url" placeholder="https://staging.example.com"><label class="label">Repository path</label><input id="repo" placeholder="/path/to/project"><button>Create QA run</button></form><div id="status" class="status">Ready.</div></div>
-<aside class="card"><h3>Run modes</h3><div class="mode"><b>URL only</b><br><span class="muted">Browser and network QA</span></div><div class="mode"><b>Repository only</b><br><span class="muted">Code inspection and local app planning</span></div><div class="mode"><b>URL + repository</b><br><span class="muted">Code-to-live correlation</span></div></aside></section>
-<section class="card"><h3>Recent runs</h3><div id="runs" class="muted">No runs yet.</div></section></main>
-<script>const form=document.querySelector('#form'),status=document.querySelector('#status'),runs=document.querySelector('#runs');async function follow(id){for(let i=0;i<30;i++){await new Promise(r=>setTimeout(r,500));const d=await fetch('/runs/'+id).then(r=>r.json());status.textContent='Run '+id+': '+d.status+(d.message?'\n'+d.message:'');if(d.status==='complete'||d.status==='failed'){if(d.browser_audit)status.textContent+='\nHTTP '+d.browser_audit.http_status+' · '+d.browser_audit.title+' · '+d.browser_audit.links+' links · '+d.browser_audit.forms+' forms\nConsole errors: '+d.browser_audit.console_errors.length+' · Failed requests: '+d.browser_audit.failed_requests.length;return}}status.textContent+='\nStill running; check the run endpoint for details.'}form.onsubmit=async e=>{e.preventDefault();const body={url:document.querySelector('#url').value||null,repository:document.querySelector('#repo').value||null,allow_mutations:false};try{const r=await fetch('/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json();if(!r.ok)throw Error(d.detail||'Unable to create run');runs.className='';runs.innerHTML='<b>'+d.mode.toUpperCase()+' audit</b><br><span class="muted">'+(d.url||d.repository)+'</span>';status.textContent='Run '+d.id+' queued.';follow(d.id)}catch(err){status.textContent=err.message}};</script></body></html>
+<style>
+body{font:16px system-ui;margin:0;background:#f5f7fb;color:#172033}
+.shell{max-width:960px;margin:auto;padding:40px 22px}
+.brand{display:flex;gap:12px;align-items:center;margin-bottom:30px}
+.mark{background:#3b5ccc;color:#fff;border-radius:12px;padding:8px 14px;font-size:24px;font-weight:800}
+.card{background:#fff;border:1px solid #e2e7f0;border-radius:16px;padding:25px;margin-bottom:20px;box-shadow:0 5px 20px #1720330d}
+.grid{display:grid;grid-template-columns:3fr 2fr;gap:20px}
+.label{display:block;font-weight:700;font-size:13px;margin:14px 0 6px}
+input[type=url],input[type=text],textarea{width:100%;box-sizing:border-box;padding:12px;border:1px solid #ccd5e5;border-radius:9px;font:inherit}
+textarea{font:13px ui-monospace,monospace;min-height:150px}
+button{background:#3b5ccc;color:#fff;border:0;border-radius:9px;padding:12px 16px;font-weight:700;margin-top:18px;cursor:pointer}
+.status{background:#eef2ff;padding:12px;border-radius:9px;margin-top:18px;white-space:pre-wrap}
+.mode{background:#f7f8fc;padding:12px;border-radius:9px;margin:10px 0}
+.muted{color:#71809a}.warn{background:#fff8c5;border-radius:9px;padding:10px;font-size:14px;margin-top:10px}
+.toggle{display:flex;gap:8px;align-items:center;margin-top:16px;font-weight:700}
+#truth{display:none}
+.flow{border-top:1px solid #e2e7f0;padding:10px 0}
+.badge{display:inline-block;padding:2px 9px;border-radius:12px;font-size:12px;font-weight:700;margin-right:6px}
+.bad{color:#cf222e;background:#ffebe9}.ok{color:#1a7f37;background:#dafbe1}.meh{color:#57606a;background:#eaeef2}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+</style></head>
+<body><main class="shell">
+<header class="brand"><div class="mark">S</div><div><h1>Satya QA</h1><div class="muted">Check whether an interface's claims match what actually persisted.</div></div></header>
+<section class="grid">
+<div class="card">
+  <h2>New run</h2>
+  <form id="form">
+    <label class="label">Website URL</label><input id="url" type="url" placeholder="https://staging.example.com/app">
+    <label class="label">Repository path (optional)</label><input id="repo" type="text" placeholder="/path/to/project">
+    <label class="toggle"><input id="mut" type="checkbox"> Truthfulness check (performs real actions)</label>
+    <div id="truth">
+      <div class="warn">This mode actually creates, edits and deletes things on the target site. Only use a test or staging environment.</div>
+      <label class="label">Allowed domain(s), comma-separated. Required.</label><input id="domains" type="text" placeholder="staging.example.com">
+      <label class="label">Selectors (JSON)</label><textarea id="selectors" style="min-height:70px">{"row_selector": "[data-id]", "toast_selector": "#toast", "id_attr": "data-id"}</textarea>
+      <label class="label">Flows (JSON)</label><textarea id="flows">[{"description": "delete the first row", "actions": [{"click": "[data-id] >> nth=0 >> .delete"}]}]</textarea>
+    </div>
+    <button id="submit">Run smoke check</button>
+  </form>
+  <div id="status" class="status">Ready.</div>
+</div>
+<aside class="card"><h3>What each run does</h3>
+  <div class="mode"><b>Smoke check</b> (default, read-only)<br><span class="muted">Loads the page and reports its HTTP status, console errors and failed requests. It does <b>not</b> verify any UI claims.</span></div>
+  <div class="mode"><b>Truthfulness check</b><br><span class="muted">Runs your flows, works out what the UI claimed (deleted, saved, added…), reloads the page, and checks the claim survived. This catches fake deletes and saves that never persist, with no backend access needed.</span></div>
+  <div class="mode"><b>Repository</b><br><span class="muted">Reads the project layout (framework, suggested run commands) without executing anything.</span></div>
+</aside>
+</section>
+<section class="card"><h3>Result</h3><div id="result" class="muted">No runs yet.</div></section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+$('#mut').onchange = () => { $('#truth').style.display = $('#mut').checked ? 'block' : 'none';
+  $('#submit').textContent = $('#mut').checked ? 'Run truthfulness check' : 'Run smoke check'; };
+function badge(v){ const cls = v==='AGREE'?'ok':(['NO_CLAIM','ACTION_FAILED'].includes(v)?'meh':'bad'); return `<span class="badge ${cls}">${esc(v)}</span>`; }
+function render(d){
+  const t = d.truthfulness_audit, b = d.browser_audit, r = d.repository_inspection; let h = '';
+  if (t){ const s = t.summary;
+    h += `<b>Truthfulness check</b> · ground truth: ${esc(t.ground_truth)}<br>${s.problems_found} problem(s), ${s.inconclusive_found} inconclusive, ${s.flows_checked} flow(s)`;
+    for (const f of t.flows){ h += `<div class="flow"><b>${esc(f.description)}</b><br>` +
+      f.findings.map(x => `${badge(x.verdict)}${esc(x.summary)}<br><span class="muted">${esc(x.detail)}</span>`).join('<br>') + `</div>`; } }
+  if (b){ h += `<b>Smoke check</b> (read-only, no claims verified)<br>HTTP ${esc(b.http_status)} · ${esc(b.title)} · ` +
+    `${b.console_errors.length} console error(s) · ${b.failed_requests.length} failed request(s)`; }
+  if (r){ h += `<br><b>Repository</b> ${esc(r.path)}: ${esc(r.framework)}${r.has_tests ? ', has tests' : ''}`; }
+  $('#result').className = ''; $('#result').innerHTML = h || esc(d.message || d.status);
+}
+async function follow(id){
+  for (let i = 0; i < 240; i++){
+    await new Promise(r => setTimeout(r, 1000));
+    const d = await fetch('/runs/' + id).then(r => r.json());
+    $('#status').textContent = `Run ${id}: ${d.status}` + (d.message ? '\n' + d.message : '');
+    if (d.status === 'complete' || d.status === 'failed' || d.status === 'ready'){ render(d); return; }
+  }
+  $('#status').textContent += '\nStill running. Check /runs/' + id;
+}
+$('#form').onsubmit = async e => {
+  e.preventDefault();
+  const body = {url: $('#url').value || null, repository: $('#repo').value || null, allow_mutations: $('#mut').checked};
+  try {
+    if (body.allow_mutations){
+      body.allowed_domains = $('#domains').value.split(',').map(s => s.trim()).filter(Boolean);
+      body.selectors = JSON.parse($('#selectors').value);
+      body.flows = JSON.parse($('#flows').value);
+    }
+    const r = await fetch('/runs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if (!r.ok) throw Error(d.detail || 'Unable to create run');
+    $('#status').textContent = `Run ${d.id} queued (${d.check || d.mode}).`;
+    follow(d.id);
+  } catch (err) { $('#status').textContent = err.message; }
+};
+</script></body></html>

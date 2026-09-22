@@ -1,0 +1,43 @@
+base_url: http://127.0.0.1:8090
+entry_path: /examples/vanillajs/index.html
+ground_truth: reload
+headless: true
+api_filters:
+- /api/
+selectors:
+  row_selector: li[data-id]
+  toast_selector: '#toast'
+  id_attr: data-id
+flows:
+- description: add todo 'Buy milk'
+  actions:
+  - fill:
+      selector: '#new-todo'
+      value: Buy milk
+  - press:
+      selector: '#new-todo'
+      key: Enter
+- description: add todo 'Walk dog'
+  actions:
+  - fill:
+      selector: '#new-todo'
+      value: Walk dog
+  - press:
+      selector: '#new-todo'
+      key: Enter
+- description: rename first todo to 'Buy oat milk'
+  actions:
+  - dblclick: li[data-id] >> nth=0 >> label
+  - fill:
+      selector: li[data-id] >> nth=0 >> input.edit
+      value: Buy oat milk
+  - press:
+      selector: li[data-id] >> nth=0 >> input.edit
+      key: Enter
+- description: mark first todo complete
+  actions:
+  - check: li[data-id] >> nth=0 >> input.toggle
+- description: delete last todo
+  actions:
+  - hover: li[data-id] >> nth=-1
+  - click: li[data-id] >> nth=-1 >> .destroy

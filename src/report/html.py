@@ -26,6 +26,8 @@ _VERDICT_STYLE = {
     Verdict.NO_REQUEST: ("#cf222e", "#ffebe9"),
     Verdict.BACKEND_ERROR: ("#cf222e", "#ffebe9"),
     Verdict.DATA_LEAK: ("#9a6700", "#fff8c5"),
+    Verdict.UNSTABLE_RENDER: ("#cf222e", "#ffebe9"),
+    Verdict.ACTION_FAILED: ("#57606a", "#eaeef2"),
 }
 
 _CSS = """

@@ -90,8 +90,64 @@ def reconcile(
     trace: ActionTrace,
     *,
     corroboration_note: str | None = None,
+    ground_truth: str = "api",
 ) -> Finding:
-    """The generic reconciliation entry point. No flow-specific branches."""
+    """
+    The generic reconciliation entry point. No flow-specific branches.
+
+    ground_truth says where `diff` came from:
+
+    - "api" (default): an independent backend read before/after the action.
+      A success claim with no state-changing request is NO_REQUEST outright.
+    - "reload": the page's own rows after a full reload (see
+      BrowserAgent.persisted_records). This is the black-box mode for apps you
+      have no backend access to. Here a missing request is not, by itself,
+      proof of a lie -- an app can legitimately persist to localStorage or
+      IndexedDB -- so the question becomes "did the claimed change survive a
+      reload?" A change that neither sent a request nor survived is reported
+      as NO_REQUEST; one that survived without a request is AGREE, with the
+      absence of network traffic noted.
+    """
+    if ground_truth not in ("api", "reload"):
+        raise ValueError(f"ground_truth must be 'api' or 'reload', got {ground_truth!r}")
+    finding = _reconcile(claim, diff, trace, corroboration_note=corroboration_note,
+                         require_request=(ground_truth == "api"))
+    if ground_truth == "api":
+        return finding
+
+    sent = any(c.method in _MUTATING_METHODS for c in trace.network_calls)
+    if finding.verdict == Verdict.UI_LIED and not sent:
+        return Finding(
+            Verdict.NO_REQUEST,
+            f"UI asserted a {claim.kind.value.lower()} succeeded, but no state-changing request "
+            f"was sent and the change did not survive a page reload.",
+            f"{finding.detail} No POST/PUT/PATCH/DELETE or WebSocket send fired during the action.",
+        )
+    if finding.verdict == Verdict.UI_LIED:
+        return Finding(Verdict.UI_LIED, finding.summary.replace("the backend", "the reloaded page"),
+                       finding.detail.replace("Backend field changes", "Changes visible after reload")
+                       + " (Ground truth: the page's rows after a full reload.)")
+    if finding.verdict == Verdict.AGREE and claim.kind != ClaimKind.NONE and claim.success_asserted:
+        note = f" ({corroboration_note})" if corroboration_note else ""
+        how = ("" if sent else
+               " No network request was observed, so it was most likely persisted client-side "
+               "(localStorage/IndexedDB).")
+        return Finding(
+            Verdict.AGREE,
+            f"UI's {claim.kind.value.lower()} claim survived a page reload{note}.",
+            f"{claim.evidence}. After a full reload the page still reflects the claimed change.{how}",
+        )
+    return finding
+
+
+def _reconcile(
+    claim: Claim,
+    diff: BackendDiff,
+    trace: ActionTrace,
+    *,
+    corroboration_note: str | None = None,
+    require_request: bool = True,
+) -> Finding:
     if claim.kind == ClaimKind.NONE and claim.success_asserted:
         return Finding(Verdict.NO_CLAIM, "UI asserted success without an identifiable effect.", claim.evidence)
     if claim.kind == ClaimKind.NONE or not claim.success_asserted:
@@ -116,7 +172,9 @@ def reconcile(
     failed_calls = [c for c in mutating_calls if c.status and c.status >= 400]
 
     # 1. The UI claimed success but no mutating request was sent at all.
-    if not mutating_calls:
+    #    (Skipped for reload ground truth -- see reconcile() -- where client-side
+    #    persistence is legitimate and the reload itself is the arbiter.)
+    if not mutating_calls and require_request:
         return Finding(
             Verdict.NO_REQUEST,
             f"UI asserted a {claim.kind.value.lower()} succeeded, but no state-changing request was sent.",

@@ -1,24 +1,25 @@
 # Satya
 
-**Catches UIs that lie about what the backend did.** Satya drives a web app with Playwright, records what the UI *claims* happened (toast text, DOM changes), records what *actually* happened (HTTP and WebSocket traffic, backend state), and flags any mismatch.
+**Catches UIs that lie about what the backend did.** Satya drives a web app with Playwright, records what the UI *claims* happened (toast text, DOM changes), checks what *actually* persisted (backend state via your API, or the page itself after a reload), and flags any mismatch.
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Playwright](https://img.shields.io/badge/Playwright-Chromium-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/python/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-service-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Tests](https://img.shields.io/badge/tests-77_passing-brightgreen?style=flat-square)](.github/workflows/tests.yml)
+[![Tests](https://img.shields.io/badge/tests-102_passing-brightgreen?style=flat-square)](.github/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
 | | |
 |---|---|
-| **Catches** | A delete that shows "Deleted!" but never calls the API · a save that shows "Saved!" but drops a field · an API response carrying data the page never shows |
-| **Verdicts** | `AGREE`, `UI_LIED`, `NO_REQUEST`, `BACKEND_ERROR`, `DATA_LEAK`, or `NO_CLAIM` (not enough evidence, reported as a coverage gap rather than a pass) |
-| **Outputs** | CLI summary with exit codes, HTML report with before/after screenshots, JUnit XML for CI |
-| **Runs as** | Python library, CLI, local FastAPI service with SQLite run history, or a browser-extension scaffold that sends the current page to the service |
-| **Tested on** | 77 unit tests (no browser needed) and two independently styled demo apps with seeded bugs. Not yet run against a real production app. |
+| **Catches** | A delete that shows "Deleted!" but never persists · a save that shows "Saved!" but keeps the old value · a page that doesn't reliably show saved data after a refresh · an API response carrying data the page never shows |
+| **Ground truth** | **API**: reads your backend before and after each action (apps you own). **Reload**: reloads the page and checks the claimed change survived, with no backend access needed (apps you don't). |
+| **Verdicts** | `AGREE`, `UI_LIED`, `NO_REQUEST`, `BACKEND_ERROR`, `DATA_LEAK`, `UNSTABLE_RENDER`, or the inconclusive `NO_CLAIM` / `ACTION_FAILED` (coverage gaps, not passes) |
+| **Outputs** | CLI summary with exit codes, HTML report with before/after screenshots, JUnit XML and JSON for CI |
+| **Runs as** | Python library, CLI, Playwright middleware, local FastAPI service + dashboard with SQLite run history, or a browser extension (read-only smoke check) |
+| **Tested on** | 102 tests (no browser needed), two demo apps with seeded bugs, and six third-party TodoMVC apps, where it found a real render race in the Sammy.js build ([docs/VALIDATION.md](docs/VALIDATION.md)). Not yet run against a large production app. |
 
-Screenshot diffs and a human glancing at the page all pass these bugs, because the page renders exactly what it promised. Satya acts on the UI and checks the UI's *claim* against the backend's *reality*.
+Screenshot diffs and a human glancing at the page all pass these bugs, because the page renders exactly what it promised. Satya acts on the UI and checks the UI's *claim* against what actually persisted.
 
-Safety: the service runs in read-only mode by default, can enforce a domain allowlist, and keeps browser execution outside the request handler. Set `allow_mutations: true` only against a test environment you control.
+The dashboard's two URL modes are different things. A **smoke check** (the default, read-only) reports HTTP status, console errors and failed requests, and does **not** verify UI claims. A **truthfulness check** (`allow_mutations: true`) runs your flows with reload ground truth. It performs real actions, so the service refuses it unless `allowed_domains` is set explicitly. Only point it at a test environment you control. Start the service with `PYTHONPATH=src uvicorn service.app:app --port 8099`.
 
 ## Quickstart
 
@@ -194,23 +195,27 @@ Worth being precise about, since the claims above are easy to over-read:
   from. Rather than silently reporting that as a clean AGREE, `reconcile()` now returns a
   distinct `NO_CLAIM` verdict for it (see "Verdicts" below) — the honest fix is surfacing the
   gap, not pretending it's closed.
-- **Validated against two independently-styled demo apps, not yet a real production one.**
-  The task-manager app and the contacts app share no code, markup, or copy — proving the
-  selector-driven config generalizes, not just that the code works once. What it hasn't done
-  yet is meet a real, pre-existing frontend's messier markup, inconsistent toast patterns, or
-  multi-request flows (see "Advanced Capabilities" for what's covered — polling for eventual
-  consistency, WebSocket-pushed mutations — and what isn't yet — a single action firing
-  several unrelated backend calls).
+- **Validated on third-party code, but not yet on a production app.** Beyond the two demo
+  apps, reload mode has run against six TodoMVC implementations it wasn't written for. Four
+  came back clean, one had a real render race, and one couldn't be supported (no row ids).
+  Full results, the false positives found and fixed along the way, and caveats are in
+  [docs/VALIDATION.md](docs/VALIDATION.md). A large production frontend, with auth, pagination
+  and virtualized lists, is still untested.
+- **Reload mode needs a stable row identity.** Rows must carry an id attribute (`id_attr`) that
+  survives a reload. Apps that render anonymous rows (TodoMVC's Kendo build, for example) can't
+  be verified this way yet.
 
 ## Verdicts
 
 | Verdict | Meaning |
 |---|---|
-| `AGREE` | The UI's claim matches backend reality, **or** the UI asserted no success (e.g. an error toast) and there was nothing to check. |
+| `AGREE` | The UI's claim matches backend reality (or, in reload mode, survived a reload), **or** the UI asserted no success (e.g. an error toast) and there was nothing to check. |
 | `UI_LIED` | The UI claimed success; the backend disagrees. |
 | `NO_REQUEST` | The UI claimed an action succeeded but no state-changing request was ever sent. |
 | `BACKEND_ERROR` | A request fired but the backend rejected it, while the UI showed success. |
 | `DATA_LEAK` | The backend response carried a field the UI never displays. |
+| `UNSTABLE_RENDER` | Reload mode only: the page showed *different* persisted state on consecutive reloads. The data may be saved, but a user who refreshes can't rely on seeing it. This counts as a hard failure. |
+| `ACTION_FAILED` | The flow's own steps couldn't be performed (e.g. a selector timed out), so nothing was verified. This is inconclusive: the other flows still run, and it only fails CI with `--fail-on-inconclusive`. |
 | `NO_CLAIM` | Insufficient evidence to verify the effect, including missing targets or values, ambiguous multi-row changes, or no toast and no DOM delta at all — Satya had no signal to reason about. **Not** the same as `AGREE`: it's a coverage gap, not a clean bill of health, and the CLI's exit code (and the JUnit report's `<skipped>`) treat it that way rather than folding it into "problems found." |
 
 ## Repo layout
@@ -232,8 +237,11 @@ tests/            pytest suite (tests: claims, VLM, reconciler, auditor, eventua
 scripts/
   run_demo.py       one-command end-to-end demo against both apps + HTML report
   veritas_cli.py    thin executable wrapper around src/cli.py
-flows.example.yaml  example CLI config (see "Command-line usage")
-demo_output/        checked-in sample output from an actual run (HTML + JUnit reports)
+flows.example.yaml         example CLI config, API ground truth (see "Command-line usage")
+flows.reload.example.yaml  example CLI config, reload ground truth (no backend access needed)
+docs/VALIDATION.md         third-party validation: results, false positives fixed, caveats
+validation/todomvc/        configs + seeded-bug patch to reproduce docs/VALIDATION.md
+demo_output/               checked-in sample output from an actual run (HTML + JUnit reports)
 ```
 
 ## Command-line usage
@@ -291,6 +299,28 @@ it performs the flow, reads what the UI claims, independently verifies against t
 and reports the mismatch.
 
 
+
+## Reload ground truth (black-box mode)
+
+```yaml
+base_url: https://staging.example.com
+ground_truth: reload          # no backend_read_path needed
+selectors: {row_selector: 'li[data-id]', id_attr: data-id, toast_selector: '[role=status]'}
+flows:
+  - description: delete the first item
+    actions:
+      - hover: 'li[data-id] >> nth=0'
+      - click: 'li[data-id] >> nth=0 >> .destroy'
+```
+
+Each flow starts with two reloads, so it acts on a trustworthy render of the persisted state.
+Then the action runs, and one more reload becomes the ground truth. If that shows the claim
+didn't survive, Satya reloads twice more before reporting it. Consistent failures are
+confirmed as such, and inconsistent renders become `UNSTABLE_RENDER`. A change that survives
+without any network request is `AGREE`, with a note that it was most likely persisted
+client-side. A change that neither sent a request nor survived is `NO_REQUEST`.
+Checkbox/radio state is included in row values in this mode, so toggles like "mark complete"
+are verifiable too. See `flows.reload.example.yaml`.
 
 ## Stricter verification and CI output
 

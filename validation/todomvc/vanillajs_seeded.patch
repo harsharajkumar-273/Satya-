@@ -1,0 +1,24 @@
+--- vanillajs_seeded/js/store.js
++++ vanillajs_seeded/js/store.js
+@@ -91,8 +91,8 @@
+ 				}
+ 			}
+ 
+-			localStorage[this._dbName] = JSON.stringify(data);
+-			callback.call(this, JSON.parse(localStorage[this._dbName]).todos);
++			// SEEDED BUG A: persist skipped; UI is re-rendered from the in-memory copy
++			callback.call(this, todos);
+ 		} else {
+ 			// Generate an ID
+ 			updateData.id = new Date().getTime();
+@@ -120,8 +120,8 @@
+ 			}
+ 		}
+ 
+-		localStorage[this._dbName] = JSON.stringify(data);
+-		callback.call(this, JSON.parse(localStorage[this._dbName]).todos);
++		// SEEDED BUG B: persist skipped; UI is re-rendered from the in-memory copy
++		callback.call(this, todos);
+ 	};
+ 
+ 	/**
