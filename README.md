@@ -1,25 +1,24 @@
 # Satya
 
-Satya’s core workflow is a URL plus an explicit safe flow: it loads the page, performs permitted actions, and returns evidence from the UI, console, and network. It also supports repository-only and combined planning modes. The local service API and browser-extension scaffold are in `src/service` and `extension`.
+**Catches UIs that lie about what the backend did.** Satya drives a web app with Playwright, records what the UI *claims* happened (toast text, DOM changes), records what *actually* happened (HTTP and WebSocket traffic, backend state), and flags any mismatch.
 
-The service persists run lifecycle and evidence in SQLite (`SATYA_DB_PATH` can select a different database), enforces optional domain allowlists, and keeps browser execution outside the request handler. This gives the project a durable SDE foundation while retaining a simple local setup. Set `allow_mutations: true` only for a deliberately controlled test environment.
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Playwright](https://img.shields.io/badge/Playwright-Chromium-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev/python/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-service-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Tests](https://img.shields.io/badge/tests-77_passing-brightgreen?style=flat-square)](.github/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-Start the service with `PYTHONPATH=src uvicorn service.app:app --port 8099`, then POST a run to `/runs` with `url`, `repository`, or both. The extension popup sends the active page URL to this service in safe read-only mode.
+| | |
+|---|---|
+| **Catches** | A delete that shows "Deleted!" but never calls the API · a save that shows "Saved!" but drops a field · an API response carrying data the page never shows |
+| **Verdicts** | `AGREE`, `UI_LIED`, `NO_REQUEST`, `BACKEND_ERROR`, `DATA_LEAK`, or `NO_CLAIM` (not enough evidence, reported as a coverage gap rather than a pass) |
+| **Outputs** | CLI summary with exit codes, HTML report with before/after screenshots, JUnit XML for CI |
+| **Runs as** | Python library, CLI, local FastAPI service with SQLite run history, or a browser-extension scaffold that sends the current page to the service |
+| **Tested on** | 77 unit tests (no browser needed) and two independently styled demo apps with seeded bugs. Not yet run against a real production app. |
 
-Satya is an agent that catches the class of frontend bug visual testing structurally cannot: where
-the UI *looks* correct but **lies about what the backend actually did**.
+Screenshot diffs and a human glancing at the page all pass these bugs, because the page renders exactly what it promised. Satya acts on the UI and checks the UI's *claim* against the backend's *reality*.
 
-A delete button that removes the row and flashes "Deleted!" — but never calls the API, so
-the record is still there after a refresh. A save that shows "Saved!" — but drops the edited
-field, so the backend keeps the old value. An API response that quietly carries an internal
-email the page never displays. Every one of these renders perfectly on screen. A screenshot
-diff, a pixel-comparison tool, a human glancing at the page — all pass them. Veritas catches
-them by acting on the UI and then checking the UI's *claim* against the backend's *reality*.
-
-> Veritas is a sibling project to PixelGuard. PixelGuard compares a UI against a visual
-> baseline ("did this change from before?"). Veritas asks a different, harder question with
-> no baseline at all: "is the UI telling the truth about what it just did?" They're
-> deliberately separate — different problem, different architecture.
+Safety: the service runs in read-only mode by default, can enforce a domain allowlist, and keeps browser execution outside the request handler. Set `allow_mutations: true` only against a test environment you control.
 
 ## Quickstart
 
@@ -83,12 +82,12 @@ For CI or scripted use without writing Python glue, see "Command-line usage" bel
 ```
 
 The whole design hinges on **two independent observation channels**. Purely-visual testing
-only has the left one — so a UI that renders a convincing lie passes. Veritas adds the right
+only has the left one — so a UI that renders a convincing lie passes. Satya adds the right
 one (what the backend actually did) and makes *the gap between them* the thing it reports.
 
 ## What makes this an agent, not a test script
 
-The important design decision: Veritas does **not** contain a `verify_delete` function with a
+The important design decision: Satya does **not** contain a `verify_delete` function with a
 hand-written rule that says "a delete should remove the record from the backend." That would
 just be a test script with network assertions, and it would only work for flows someone
 pre-wrote.
@@ -128,7 +127,7 @@ pretended-away.
 ## The demo app and its bugs
 
 `src/agent_demo/app.py` is a self-contained FastAPI app serving both a small task-manager
-frontend and its JSON API, built to contain exactly the bugs Veritas targets. All three are
+frontend and its JSON API, built to contain exactly the bugs Satya targets. All three are
 invisible on screen — the UI renders correctly in every case:
 
 - **Fake delete (`NO_REQUEST`)** — clicking Delete removes the row from the DOM and shows
@@ -212,7 +211,7 @@ Worth being precise about, since the claims above are easy to over-read:
 | `NO_REQUEST` | The UI claimed an action succeeded but no state-changing request was ever sent. |
 | `BACKEND_ERROR` | A request fired but the backend rejected it, while the UI showed success. |
 | `DATA_LEAK` | The backend response carried a field the UI never displays. |
-| `NO_CLAIM` | Insufficient evidence to verify the effect, including missing targets or values, ambiguous multi-row changes, or no toast and no DOM delta at all — Veritas had no signal to reason about. **Not** the same as `AGREE`: it's a coverage gap, not a clean bill of health, and the CLI's exit code (and the JUnit report's `<skipped>`) treat it that way rather than folding it into "problems found." |
+| `NO_CLAIM` | Insufficient evidence to verify the effect, including missing targets or values, ambiguous multi-row changes, or no toast and no DOM delta at all — Satya had no signal to reason about. **Not** the same as `AGREE`: it's a coverage gap, not a clean bill of health, and the CLI's exit code (and the JUnit report's `<skipped>`) treat it that way rather than folding it into "problems found." |
 
 ## Repo layout
 
@@ -253,11 +252,11 @@ echo $?   # 0 if every flow agreed, 1 if any UI_LIED / NO_REQUEST / BACKEND_ERRO
 app, not per flow — see "Scope and current limitations"), and a list of `flows`, each a
 `description` plus a sequence of declarative `actions` (`click`, `fill`, `press`, `check`,
 `wait_ms`). `NO_CLAIM` findings don't affect the exit code (see "Verdicts") — a build shouldn't
-go red because a flow had no toast and no DOM delta to reason about, only because Veritas
+go red because a flow had no toast and no DOM delta to reason about, only because Satya
 actually caught a discrepancy. The JUnit report reports those flows as `<skipped>` instead, so
 the coverage gap is still visible in CI without failing the build over it.
 
-## How to use Veritas in existing Playwright tests
+## How to use Satya in existing Playwright tests
 
 You can wrap existing Playwright tests with `VeritasAuditor`:
 
@@ -287,7 +286,7 @@ def test_delete_action(page):
 
 The three bugs are not arbitrary — they're the same classes of defect caught by hand during a
 real UI rewrite: deletes and saves that never reached the backend, and a share flow leaking
-internal fields to recipients. Veritas is that manual QA work turned into an autonomous agent:
+internal fields to recipients. Satya is that manual QA work turned into an autonomous agent:
 it performs the flow, reads what the UI claims, independently verifies against the backend,
 and reports the mismatch.
 
