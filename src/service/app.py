@@ -104,7 +104,7 @@ async def create_run(request: RunRequest):
                     "allowed_domains": request.allowed_domains}
     STORE.create(run)
     asyncio.create_task(_prepare(run_id, request))
-    return RUNS[run_id]
+    return run
 
 
 @app.get("/runs/{run_id}")
