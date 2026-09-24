@@ -118,8 +118,8 @@ def render_html_report(results: list[FlowResult], out_path: str | Path, *, title
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     stats = "".join(
-        f'<div class="stat"><span class="n">{v}</span><span class="l">{l}</span></div>'
-        for v, l in (
+        f'<div class="stat"><span class="n">{value}</span><span class="l">{label}</span></div>'
+        for value, label in (
             (summary["flows_checked"], "flows checked"),
             (summary["problems_found"], "problems found"),
             (summary["inconclusive_found"], "inconclusive"),

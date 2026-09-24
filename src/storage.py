@@ -9,7 +9,7 @@ from typing import Any
 
 class RunStore:
     def __init__(self, path: str | Path | None = None):
-        self.path = Path(path or os.getenv("SATYA_DB_PATH", "/tmp/satya-runs.sqlite3"))
+        self.path = Path(path) if path is not None else Path(os.getenv("SATYA_DB_PATH", "/tmp/satya-runs.sqlite3"))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS runs (
@@ -30,14 +30,16 @@ class RunStore:
     def get(self, run_id: str) -> dict[str, Any] | None:
         with self._connect() as db:
             row = db.execute("SELECT payload,result FROM runs WHERE id=?", (run_id,)).fetchone()
-        if not row: return None
+        if not row:
+            return None
         data = json.loads(row["payload"])
         data.update(json.loads(row["result"]))
         return data
 
     def update(self, run_id: str, **changes: Any) -> dict[str, Any]:
         current = self.get(run_id)
-        if current is None: raise KeyError(run_id)
+        if current is None:
+            raise KeyError(run_id)
         current.update(changes)
         base_keys = {"id", "status", "created_at", "mode", "url", "repository", "branch", "safe_only", "flows"}
         base = {k: current[k] for k in base_keys if k in current}

@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from agent.loop import safe_verify_action, summarize, verify_action
+from agent.loop import safe_verify_action, summarize
 from browser.agent import BrowserAgent
 from models import FlowResult, Verdict
 from report.html import render_html_report

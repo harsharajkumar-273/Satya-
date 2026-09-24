@@ -267,7 +267,6 @@ def test_no_leak_when_clean():
 def test_eventual_consistency_retry_success():
     """Simulate a backend where change appears on subsequent poll within timeout."""
     poll_count = 0
-    records = [{"id": 1, "title": "Old"}]
 
     def mock_fetch():
         nonlocal poll_count

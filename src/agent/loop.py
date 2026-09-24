@@ -89,6 +89,9 @@ def verify_action(
         before_snap = BackendSnapshot.from_list(_fetch_records(), id_key=backend_id_key)
     trace: ActionTrace = agent.act(description, do)
     after_snap = BackendSnapshot.from_list(_fetch_records(), id_key=backend_id_key)
+    assert trace.ui_before is not None and trace.ui_after is not None, (
+        "agent.act() must capture both UI snapshots"
+    )
 
     claim = infer_claim(
         trace.ui_before,

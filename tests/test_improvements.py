@@ -12,7 +12,6 @@ from reconcile.reconciler import reconcile
 from agent.loop import poll_for_agreement, validate_polling, verify_action
 from audit.middleware import VeritasAuditor
 from cli import build_do, main
-from report.json_report import render_json_report
 
 
 def trace(method='PUT'):

@@ -32,7 +32,7 @@ from models import ActionTrace, NetworkCall, UISnapshot
 try:
     from playwright.sync_api import sync_playwright
 except ImportError:
-    sync_playwright = None  # Playwright is optional for unit testing and models
+    sync_playwright = None  # type: ignore[assignment]  # Playwright is optional for unit testing and models
 
 # Re-exports for backward compatibility
 __all__ = ["NetworkCall", "ActionTrace", "BrowserAgent", "ws_frame_to_call"]

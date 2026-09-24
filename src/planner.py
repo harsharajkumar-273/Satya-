@@ -43,8 +43,11 @@ def inspect_repository(path: str | Path) -> dict[str, Any]:
     elif pyproject.exists() or (root / "requirements.txt").exists():
         framework = "python"
     commands = []
-    if (root / "package.json").exists(): commands.append("npm run dev")
-    if (root / "manage.py").exists(): commands.append("python manage.py runserver")
-    if (root / "pyproject.toml").exists(): commands.append("python -m uvicorn <module>:app")
+    if (root / "package.json").exists():
+        commands.append("npm run dev")
+    if (root / "manage.py").exists():
+        commands.append("python manage.py runserver")
+    if (root / "pyproject.toml").exists():
+        commands.append("python -m uvicorn <module>:app")
     return {"path": str(root), "framework": framework, "top_level": sorted(files),
             "suggested_commands": commands, "has_tests": (root / "tests").exists()}
