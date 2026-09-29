@@ -15,7 +15,13 @@
 | **Verdicts** | `AGREE`, `UI_LIED`, `NO_REQUEST`, `BACKEND_ERROR`, `DATA_LEAK`, `UNSTABLE_RENDER`, or the inconclusive `NO_CLAIM` / `ACTION_FAILED` (coverage gaps, not passes) |
 | **Outputs** | CLI summary with exit codes, HTML report with before/after screenshots, JUnit XML and JSON for CI |
 | **Runs as** | Python library, CLI, Playwright middleware, local FastAPI service + dashboard with SQLite run history, or a browser extension (read-only smoke check) |
-| **Tested on** | 102 tests (no browser needed), two demo apps with seeded bugs, and six third-party TodoMVC apps, where it found a real render race in the Sammy.js build ([docs/VALIDATION.md](docs/VALIDATION.md)). Not yet run against a large production app. |
+| **Tested on** | 102 tests (no browser needed), two demo apps with seeded bugs, and seven third-party TodoMVC apps, where it found a real render race in the Sammy.js build ([docs/VALIDATION.md](docs/VALIDATION.md)). Not yet run against a large production app. |
+
+![Satya catching a UI that shows "Updated!" while the backend keeps the old value](docs/media/ui_lied_demo.gif)
+
+*Actual output from `scripts/run_demo.py`: the phone-number edit renders "Updated!" and the new
+value, but the request that fired never carried the field, so the backend never changed. Satya
+reports `UI_LIED` instead of a false pass.*
 
 Screenshot diffs and a human glancing at the page all pass these bugs, because the page renders exactly what it promised. Satya acts on the UI and checks the UI's *claim* against what actually persisted.
 
@@ -40,6 +46,9 @@ Runs in well under a minute; a checked-in sample of that report and of the CLI's
 output without running anything.
 
 For CI or scripted use without writing Python glue, see "Command-line usage" below.
+
+For a module-by-module walkthrough of the pipeline (browser agent → claim inference → backend
+diff → reconciler) and how the four interfaces sit on top of it, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## The core idea, in one picture
 

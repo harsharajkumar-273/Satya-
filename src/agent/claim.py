@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
@@ -222,7 +221,7 @@ class HeuristicClaimInferrer(BaseClaimInferrer):
 class VLMClaimInferrer(BaseClaimInferrer):
     """
     Vision-Language Model claim inferrer.
-    
+
     Inspects action description, toast text, DOM deltas, and before/after screenshots
     to infer user intent and UI promises using multimodal models (Gemini API).
     Falls back gracefully to HeuristicClaimInferrer if unconfigured or unreachable.

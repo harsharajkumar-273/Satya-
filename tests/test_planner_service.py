@@ -12,7 +12,8 @@ def test_plan_selects_three_input_modes(tmp_path):
 
 def test_plan_requires_an_input():
     import pytest
-    with pytest.raises(ValueError): plan_run()
+    with pytest.raises(ValueError):
+        plan_run()
 
 
 def test_repository_inspection_is_non_executing(tmp_path):

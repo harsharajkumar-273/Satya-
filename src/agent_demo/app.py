@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import copy
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
 app = FastAPI(title="Satya demo target")

@@ -27,6 +27,7 @@ Each app ran the same five flows: add two todos, rename one, mark one complete, 
 | **Sammy.js** | **Real bug found:** `UNSTABLE_RENDER`, see below |
 | Vanilla JS with 2 seeded bugs | 3/3 affected flows caught (`NO_REQUEST`), 2 untouched flows `AGREE` |
 | Kendo UI | Not supported: its rows have no stable id attribute, so there is no way to tell which record changed |
+| Lavaca (RequireJS) | Not supported: the id lives on a `<div data-id>` nested inside the `<li>` row, not on the row itself — same limitation class as Kendo UI, different markup shape |
 | jQuery | Not runnable: the npm snapshot is missing its `bower_components` |
 
 The task-manager and contacts demo apps were also re-run in both ground-truth modes. Reload
@@ -81,6 +82,11 @@ Page loads also now wait for network idle plus a stable row snapshot, instead of
   independent finding.
 - Reload ground truth performs real actions. Only point it at test or staging environments.
   The service refuses mutation mode unless `allowed_domains` is set explicitly.
+- Both "not supported" results (Kendo UI, Lavaca) share one root cause: Satya identifies a
+  record by reading an id attribute off the DOM element matched by `row_selector`. Kendo UI's
+  rows carry no id anywhere; Lavaca's TodoMVC build puts `data-id` on a `<div>` nested inside the
+  `<li>` row rather than on the row element itself, so the same lookup finds nothing. Any app
+  whose stable identifier isn't on the element you point `row_selector` at will hit this.
 
 ## Reproducing
 
