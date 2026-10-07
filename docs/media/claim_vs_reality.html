@@ -50,6 +50,13 @@ text{fill:var(--fg);font-family:"IBM Plex Sans",system-ui,sans-serif}
 .chip{fill:var(--panel);stroke:var(--line);stroke-width:1.25}
 .chip-core{stroke:var(--core)}
 .chip text{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;fill:var(--fg)}
+.boxline-planned{fill:none;stroke:var(--muted);stroke-width:1.5;stroke-dasharray:6 4}
+.boxline-planned-c{fill:none;stroke:var(--core);stroke-width:1.75;stroke-dasharray:6 4}
+.arrow-planned{stroke:var(--muted);stroke-width:1.5;fill:none;stroke-dasharray:5 4}
+.arrow-planned-c{stroke:var(--core);stroke-width:1.5;fill:none;stroke-dasharray:5 4}
+.badge{display:inline-flex;align-items:center;gap:6px;font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:11px;letter-spacing:0.04em;color:var(--core);border:1px dashed var(--core);
+  border-radius:999px;padding:4px 12px;margin-bottom:12px}
 section{margin-top:40px}
 h2{font-size:1.1rem;font-weight:600;margin:0 0 8px}
 p.note{color:var(--muted);font-size:0.95rem;line-height:1.6;max-width:66ch}
@@ -210,5 +217,89 @@ footer{margin-top:48px;color:var(--muted);font-size:0.85rem;border-top:1px solid
       <span class="mono">docs/AGENT_TOOL_ROADMAP.md</span>).</figcaption>
   </figure>
 
-  <footer>Source: <span class="mono">docs/ARCHITECTURE.md</span> in the Satya repository.</footer>
+  <figure>
+    <span class="badge">PLANNED — not yet built</span>
+    <p class="note" style="margin:0 0 14px">The latest decision, from <span class="mono">docs/AGENT_TOOL_ROADMAP.md</span>:
+    expose Figure 1's pipeline to a calling agent as an MCP tool, and gate anything that mutates
+    a page behind proof the caller actually owns the domain — not the self-declared
+    <span class="mono">allowed_domains</span> list <span class="mono">service/app.py</span> trusts today.</p>
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 960 520" role="img" aria-label="Planned architecture: a calling agent reaches three MCP tools. satya_inspect_page and satya_check_url in smoke mode are read-only and go straight to the core pipeline with no gate. satya_run_flow and satya_check_url in truthfulness mode mutate the page, so they must first pass a verified domains gate that checks proof of ownership; if verified they proceed to the core pipeline, if not they are rejected.">
+        <defs>
+          <marker id="arrowp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+          <marker id="arrowpc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--core)"/>
+          </marker>
+        </defs>
+
+        <!-- agent -->
+        <rect class="boxfill boxline-planned" x="350" y="24" width="260" height="56" rx="10"/>
+        <text class="lbl" x="480" y="48" text-anchor="middle">CALLING AGENT</text>
+        <text class="sm" x="480" y="66" text-anchor="middle">decides the flow, calls the tool</text>
+
+        <line class="arrow-planned" x1="420" y1="80" x2="190" y2="116" marker-end="url(#arrowp)"/>
+        <line class="arrow-planned" x1="480" y1="80" x2="480" y2="116" marker-end="url(#arrowp)"/>
+        <line class="arrow-planned-c" x1="540" y1="80" x2="770" y2="116" marker-end="url(#arrowpc)"/>
+
+        <!-- tool A: inspect_page -->
+        <rect class="boxfill boxline-planned" x="60" y="120" width="260" height="70" rx="10"/>
+        <text class="mono-sm" x="190" y="144" text-anchor="middle" fill="var(--fg)" font-size="12">satya_inspect_page</text>
+        <text class="sm" x="190" y="162" text-anchor="middle">reads DOM, suggests selectors</text>
+        <text class="sm" x="190" y="178" text-anchor="middle" font-style="italic">read-only</text>
+
+        <!-- tool B: check_url smoke -->
+        <rect class="boxfill boxline-planned" x="350" y="120" width="260" height="70" rx="10"/>
+        <text class="mono-sm" x="480" y="144" text-anchor="middle" fill="var(--fg)" font-size="12">satya_check_url</text>
+        <text class="sm" x="480" y="162" text-anchor="middle">mode = smoke</text>
+        <text class="sm" x="480" y="178" text-anchor="middle" font-style="italic">read-only</text>
+
+        <!-- tool C: run_flow / truthfulness -->
+        <rect class="boxfill boxline-planned-c" x="640" y="120" width="260" height="70" rx="10"/>
+        <text class="mono-sm" x="770" y="144" text-anchor="middle" fill="var(--core)" font-size="12">satya_run_flow /</text>
+        <text class="mono-sm" x="770" y="160" text-anchor="middle" fill="var(--core)" font-size="12">check_url(truthfulness)</text>
+        <text class="sm" x="770" y="178" text-anchor="middle" font-style="italic">mutates the page</text>
+
+        <!-- C -> gate -->
+        <line class="arrow-planned-c" x1="770" y1="190" x2="770" y2="256" marker-end="url(#arrowpc)"/>
+
+        <!-- gate -->
+        <rect class="boxfill boxline-planned-c" x="640" y="260" width="260" height="76" rx="10"/>
+        <text class="lbl" x="770" y="284" text-anchor="middle" fill="var(--core)">VERIFIED DOMAINS GATE</text>
+        <text class="sm" x="770" y="302" text-anchor="middle">proof of ownership, not a</text>
+        <text class="sm" x="770" y="318" text-anchor="middle">self-declared allowed_domains list</text>
+
+        <!-- gate -> rejected -->
+        <path class="arrow-planned" d="M900,298 h40 v70" marker-end="url(#arrowp)"/>
+        <text class="edgelbl" x="906" y="312">not verified</text>
+        <rect class="boxfill boxline-planned" x="800" y="370" width="160" height="46" rx="8"/>
+        <text class="sm" x="880" y="390" text-anchor="middle">REJECTED</text>
+        <text class="sm" x="880" y="404" text-anchor="middle" font-size="10">400: domain not verified</text>
+
+        <!-- gate -> core (verified) -->
+        <line class="arrow-planned-c" x1="700" y1="336" x2="600" y2="440" marker-end="url(#arrowpc)"/>
+        <text class="edgelbl" x="700" y="390" fill="var(--core)" text-anchor="end">verified</text>
+
+        <!-- A -> core (bypass) -->
+        <line class="arrow-planned" x1="220" y1="190" x2="380" y2="440" marker-end="url(#arrowp)"/>
+        <!-- B -> core (bypass) -->
+        <line class="arrow-planned" x1="480" y1="190" x2="480" y2="440" marker-end="url(#arrowp)"/>
+        <text class="edgelbl" x="494" y="330">no gate — read-only</text>
+
+        <!-- core pipeline -->
+        <rect class="boxfill boxline-c" x="280" y="440" width="400" height="66" rx="10"/>
+        <text class="lbl" x="480" y="464" text-anchor="middle" fill="var(--core)">CORE PIPELINE</text>
+        <text class="mono-sm" x="480" y="482" text-anchor="middle">Figure 1 — claim inference + reconciler</text>
+        <text class="sm" x="480" y="498" text-anchor="middle">unchanged by any of this</text>
+      </svg>
+    </div>
+    <figcaption>Figure 3. Inspecting a page or running a smoke check never touches the gate — they're
+      read-only, same as today's dashboard default. Anything that performs real actions
+      (<span class="mono">satya_run_flow</span>, a truthfulness check) has to clear the verified-domains
+      gate first, which doesn't exist yet: it's the one piece of new infrastructure the roadmap calls
+      for before any of this can run against a site neither of us owns.</figcaption>
+  </figure>
+
+  <footer>Source: <span class="mono">docs/ARCHITECTURE.md</span> and <span class="mono">docs/AGENT_TOOL_ROADMAP.md</span> in the Satya repository.</footer>
 </div>
