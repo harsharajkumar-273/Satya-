@@ -49,6 +49,8 @@ For CI or scripted use without writing Python glue, see "Command-line usage" bel
 
 For a module-by-module walkthrough of the pipeline (browser agent → claim inference → backend
 diff → reconciler) and how the four interfaces sit on top of it, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+For the plan to expose Satya as an agent-callable tool and to collect a verified, real-world bug
+count, see [docs/AGENT_TOOL_ROADMAP.md](docs/AGENT_TOOL_ROADMAP.md).
 
 ## The core idea, in one picture
 
