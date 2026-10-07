@@ -1,0 +1,214 @@
+<title>Claim vs Reality</title>
+<style>
+/* layout: a tall single column — intro, then two figures, each a labeled
+   flow diagram that scrolls horizontally on narrow screens rather than
+   shrinking past legibility */
+:root{
+  --bg:#eef0ee; --panel:#f8f9f7; --fg:#14181a; --muted:#5b6460; --line:#c7cdc6;
+  --visual:#9a5a1f; --backend:#2b5f82; --core:#9a3b2c;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15181a; --panel:#1d2224; --fg:#eceeec; --muted:#9aa29c; --line:#3a4240;
+    --visual:#d99a52; --backend:#79b3de; --core:#e07a63;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15181a; --panel:#1d2224; --fg:#eceeec; --muted:#9aa29c; --line:#3a4240;
+  --visual:#d99a52; --backend:#79b3de; --core:#e07a63;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:"IBM Plex Sans",system-ui,sans-serif;
+  padding-inline:16px;padding-block:32px}
+.wrap{max-width:920px;margin:0 auto}
+h1{font-family:"IBM Plex Sans",system-ui,sans-serif;font-weight:600;font-size:clamp(1.5rem,4vw,2.1rem);
+  letter-spacing:-0.01em;margin:0 0 6px;text-wrap:balance}
+.sub{color:var(--muted);font-size:1rem;line-height:1.5;max-width:62ch;margin:0 0 36px}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+figure{margin:0 0 44px;padding:0}
+.diagram-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;
+  background:var(--panel);padding:18px 10px}
+.diagram-scroll svg{display:block;margin:0 auto;width:100%;min-width:720px;height:auto}
+figcaption{color:var(--muted);font-size:0.9rem;line-height:1.5;margin-top:10px;max-width:62ch}
+.boxfill{fill:var(--panel)}
+.boxline{fill:none;stroke:var(--line);stroke-width:1.5}
+.boxline-v{fill:none;stroke:var(--visual);stroke-width:1.75}
+.boxline-b{fill:none;stroke:var(--backend);stroke-width:1.75}
+.boxline-c{fill:none;stroke:var(--core);stroke-width:2}
+text{fill:var(--fg);font-family:"IBM Plex Sans",system-ui,sans-serif}
+.lbl{font-size:13px;font-weight:600;letter-spacing:0.02em}
+.sm{font-size:11.5px;fill:var(--muted)}
+.mono-sm{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;fill:var(--muted)}
+.arrow{stroke:var(--muted);stroke-width:1.5;fill:none}
+.arrow-v{stroke:var(--visual)}
+.arrow-b{stroke:var(--backend)}
+.arrow-c{stroke:var(--core)}
+.edgelbl{font-size:10.5px;fill:var(--muted);font-style:italic}
+.chip{fill:var(--panel);stroke:var(--line);stroke-width:1.25}
+.chip-core{stroke:var(--core)}
+.chip text{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;fill:var(--fg)}
+section{margin-top:40px}
+h2{font-size:1.1rem;font-weight:600;margin:0 0 8px}
+p.note{color:var(--muted);font-size:0.95rem;line-height:1.6;max-width:66ch}
+code.inline{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:0.88em;
+  background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:0.05em 0.35em}
+footer{margin-top:48px;color:var(--muted);font-size:0.85rem;border-top:1px solid var(--line);padding-top:16px}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<div class="wrap">
+  <h1>Claim vs Reality</h1>
+  <p class="sub">Satya drives a UI, listens to what it <em>says</em> happened, and separately checks
+  what the backend (or the page itself, after a reload) says actually happened. Everything below is
+  drawn from the live code in <code class="inline">src/agent</code>, <code class="inline">src/reconcile</code>
+  and <code class="inline">src/browser</code> — not a simplified gloss on it.</p>
+
+  <figure>
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 960 760" role="img" aria-label="The agent loop acts on the app under test through the browser agent. The app's response splits into two independently observed channels: a visual channel of toast text and DOM changes, which is run through claim inference, and a backend channel of real HTTP traffic and API state. Both feed the reconciler, which compares the inferred claim against the backend diff and outputs one verdict: AGREE, UI_LIED, NO_REQUEST, BACKEND_ERROR, or DATA_LEAK.">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+          <marker id="arrow-v" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--visual)"/>
+          </marker>
+          <marker id="arrow-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--backend)"/>
+          </marker>
+          <marker id="arrow-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--core)"/>
+          </marker>
+        </defs>
+
+        <!-- 1. agent loop -->
+        <rect class="boxfill boxline" x="340" y="24" width="280" height="56" rx="10"/>
+        <text class="lbl" x="480" y="48" text-anchor="middle">AGENT LOOP</text>
+        <text class="sm" x="480" y="66" text-anchor="middle">act on a UI flow (click, type)</text>
+
+        <line class="arrow" x1="480" y1="80" x2="480" y2="116" marker-end="url(#arrow)"/>
+
+        <!-- 2. browser agent -->
+        <rect class="boxfill boxline" x="330" y="120" width="300" height="60" rx="10"/>
+        <text class="lbl" x="480" y="146" text-anchor="middle">BROWSER AGENT</text>
+        <text class="sm" x="480" y="164" text-anchor="middle">Playwright + network interception</text>
+
+        <line class="arrow" x1="480" y1="180" x2="480" y2="206" marker-end="url(#arrow)"/>
+        <text class="edgelbl" x="494" y="197">acts on</text>
+
+        <!-- 3. app under test -->
+        <rect class="boxfill boxline" x="340" y="210" width="280" height="56" rx="10"/>
+        <text class="lbl" x="480" y="234" text-anchor="middle">APP UNDER TEST</text>
+        <text class="sm" x="480" y="252" text-anchor="middle">whatever you point it at</text>
+
+        <!-- split: observes -->
+        <line class="arrow arrow-v" x1="420" y1="266" x2="260" y2="334" marker-end="url(#arrow-v)"/>
+        <text class="edgelbl" x="300" y="294" fill="var(--visual)">observes</text>
+        <line class="arrow arrow-b" x1="540" y1="266" x2="700" y2="334" marker-end="url(#arrow-b)"/>
+        <text class="edgelbl" x="610" y="294" fill="var(--backend)" text-anchor="end">observes</text>
+
+        <!-- visual channel -->
+        <rect class="boxfill boxline-v" x="100" y="338" width="320" height="88" rx="10"/>
+        <text class="lbl" x="260" y="362" text-anchor="middle" fill="var(--visual)">VISUAL CHANNEL</text>
+        <text class="sm" x="260" y="380" text-anchor="middle">toast text + DOM delta</text>
+        <text class="sm" x="260" y="396" text-anchor="middle" font-style="italic">= what the UI claims</text>
+        <text class="mono-sm" x="260" y="414" text-anchor="middle">src/browser/agent.py</text>
+
+        <!-- backend channel -->
+        <rect class="boxfill boxline-b" x="540" y="338" width="320" height="88" rx="10"/>
+        <text class="lbl" x="700" y="362" text-anchor="middle" fill="var(--backend)">BACKEND CHANNEL</text>
+        <text class="sm" x="700" y="380" text-anchor="middle">real HTTP traffic + API state</text>
+        <text class="sm" x="700" y="396" text-anchor="middle" font-style="italic">= what actually happened</text>
+        <text class="mono-sm" x="700" y="414" text-anchor="middle">src/reconcile/backend.py</text>
+
+        <!-- visual -> claim inference -->
+        <line class="arrow arrow-v" x1="260" y1="426" x2="260" y2="464" marker-end="url(#arrow-v)"/>
+
+        <!-- claim inference -->
+        <rect class="boxfill boxline-v" x="110" y="468" width="300" height="78" rx="10"/>
+        <text class="lbl" x="260" y="492" text-anchor="middle" fill="var(--visual)">CLAIM INFERENCE</text>
+        <text class="sm" x="260" y="510" text-anchor="middle">"UI says it did a</text>
+        <text class="sm" x="260" y="526" text-anchor="middle">REMOVAL of #1"</text>
+
+        <!-- claim -> reconciler -->
+        <line class="arrow arrow-v" x1="330" y1="546" x2="420" y2="584" marker-end="url(#arrow-v)"/>
+        <!-- backend -> reconciler (long run down the right side) -->
+        <line class="arrow arrow-b" x1="700" y1="426" x2="700" y2="556" marker-end="none"/>
+        <line class="arrow arrow-b" x1="700" y1="556" x2="610" y2="588" marker-end="url(#arrow-b)"/>
+
+        <!-- reconciler -->
+        <rect class="boxfill boxline-c" x="330" y="588" width="300" height="70" rx="10"/>
+        <text class="lbl" x="480" y="614" text-anchor="middle" fill="var(--core)">RECONCILER</text>
+        <text class="sm" x="480" y="632" text-anchor="middle">does the claim match reality?</text>
+        <text class="mono-sm" x="480" y="648" text-anchor="middle">reconcile/reconciler.py :: reconcile()</text>
+
+        <line class="arrow arrow-c" x1="480" y1="658" x2="480" y2="686" marker-end="url(#arrow-c)"/>
+
+        <!-- verdicts -->
+        <rect class="boxfill boxline-c" x="120" y="690" width="720" height="58" rx="10"/>
+        <text class="sm" x="480" y="710" text-anchor="middle">one verdict out:</text>
+        <g class="chip" transform="translate(150,718)"><rect class="chip chip-core" width="88" height="22" rx="11"/><text x="44" y="15" text-anchor="middle">AGREE</text></g>
+        <g class="chip" transform="translate(250,718)"><rect class="chip chip-core" width="98" height="22" rx="11"/><text x="49" y="15" text-anchor="middle">UI_LIED</text></g>
+        <g class="chip" transform="translate(360,718)"><rect class="chip chip-core" width="116" height="22" rx="11"/><text x="58" y="15" text-anchor="middle">NO_REQUEST</text></g>
+        <g class="chip" transform="translate(488,718)"><rect class="chip chip-core" width="132" height="22" rx="11"/><text x="66" y="15" text-anchor="middle">BACKEND_ERROR</text></g>
+        <g class="chip" transform="translate(632,718)"><rect class="chip chip-core" width="112" height="22" rx="11"/><text x="56" y="15" text-anchor="middle">DATA_LEAK</text></g>
+      </svg>
+    </div>
+    <figcaption>Figure 1. The agent acts once; the app's reaction is read through two independently
+      observed channels — what the UI displayed (amber) and what the backend actually recorded
+      (blue) — and the reconciler's only job is to say whether the first channel's claim holds up
+      against the second. <span class="mono">NO_CLAIM</span> and <span class="mono">ACTION_FAILED</span>
+      (not shown) mean the pipeline couldn't form an opinion, not that it passed.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 960 260" role="img" aria-label="Four interfaces — the CLI, the FastAPI service and dashboard, the Playwright middleware, and the browser extension — all call down into the same core verification pipeline from Figure 1, rather than each re-implementing claim inference or reconciliation.">
+        <defs>
+          <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+        </defs>
+
+        <rect class="boxfill boxline" x="24" y="24" width="210" height="58" rx="10"/>
+        <text class="lbl" x="129" y="48" text-anchor="middle">CLI</text>
+        <text class="mono-sm" x="129" y="66" text-anchor="middle">python -m cli</text>
+
+        <rect class="boxfill boxline" x="258" y="24" width="210" height="58" rx="10"/>
+        <text class="lbl" x="363" y="46" text-anchor="middle">SERVICE +</text>
+        <text class="lbl" x="363" y="60" text-anchor="middle">DASHBOARD</text>
+        <text class="mono-sm" x="363" y="76" text-anchor="middle" font-size="10">FastAPI, SQLite history</text>
+
+        <rect class="boxfill boxline" x="492" y="24" width="210" height="58" rx="10"/>
+        <text class="lbl" x="597" y="46" text-anchor="middle">PLAYWRIGHT</text>
+        <text class="lbl" x="597" y="60" text-anchor="middle">MIDDLEWARE</text>
+        <text class="mono-sm" x="597" y="76" text-anchor="middle" font-size="10">drop into existing tests</text>
+
+        <rect class="boxfill boxline" x="726" y="24" width="210" height="58" rx="10"/>
+        <text class="lbl" x="831" y="46" text-anchor="middle">BROWSER</text>
+        <text class="lbl" x="831" y="60" text-anchor="middle">EXTENSION</text>
+        <text class="mono-sm" x="831" y="76" text-anchor="middle" font-size="10">read-only smoke check</text>
+
+        <line class="arrow" x1="129" y1="82" x2="455" y2="166" marker-end="url(#arrow2)"/>
+        <line class="arrow" x1="363" y1="82" x2="462" y2="166" marker-end="url(#arrow2)"/>
+        <line class="arrow" x1="597" y1="82" x2="498" y2="166" marker-end="url(#arrow2)"/>
+        <line class="arrow" x1="831" y1="82" x2="505" y2="166" marker-end="url(#arrow2)"/>
+
+        <rect class="boxfill boxline-c" x="300" y="170" width="360" height="66" rx="10"/>
+        <text class="lbl" x="480" y="196" text-anchor="middle" fill="var(--core)">same core, every time</text>
+        <text class="mono-sm" x="480" y="214" text-anchor="middle">verify_action() / VeritasAuditor — Figure 1's pipeline</text>
+      </svg>
+    </div>
+    <figcaption>Figure 2. Four different front doors, one verification engine. None of them
+      re-implement claim inference or reconciliation — they just supply a flow and a
+      <span class="mono">ground_truth</span> mode, which is also why an MCP tool can sit here as a
+      fifth caller without touching Figure 1 at all (see
+      <span class="mono">docs/AGENT_TOOL_ROADMAP.md</span>).</figcaption>
+  </figure>
+
+  <footer>Source: <span class="mono">docs/ARCHITECTURE.md</span> in the Satya repository.</footer>
+</div>
