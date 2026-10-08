@@ -5,6 +5,12 @@ Every result here comes from a live run with headless Chromium. Configs are in
 to answer the one question the demo apps can't: does Satya hold up on code
 that wasn't built to contain the bugs it looks for?
 
+See also [docs/FINDINGS.md](FINDINGS.md): an automated pytest suite (`tests/browser/`) that
+reproduces the Sammy.js finding below as a repeatable assertion rather than a one-off script, and
+extends coverage to WebSocket mutations, optimistic-UI rollback failures, and delayed/eventually
+consistent backend responses — with every result sorted into confirmed bugs, false positives,
+unsupported cases, and inconclusive results.
+
 ## What was tested
 
 The target is [TodoMVC](https://todomvc.com), the same todo app built in dozens of

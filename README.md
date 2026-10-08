@@ -15,7 +15,7 @@
 | **Verdicts** | `AGREE`, `UI_LIED`, `NO_REQUEST`, `BACKEND_ERROR`, `DATA_LEAK`, `UNSTABLE_RENDER`, or the inconclusive `NO_CLAIM` / `ACTION_FAILED` (coverage gaps, not passes) |
 | **Outputs** | CLI summary with exit codes, HTML report with before/after screenshots, JUnit XML and JSON for CI |
 | **Runs as** | Python library, CLI, Playwright middleware, local FastAPI service + dashboard with SQLite run history, or a browser extension (read-only smoke check) |
-| **Tested on** | 102 tests (no browser needed), two demo apps with seeded bugs, and seven third-party TodoMVC apps, where it found a real render race in the Sammy.js build ([docs/VALIDATION.md](docs/VALIDATION.md)). Not yet run against a large production app. |
+| **Tested on** | 102 no-browser unit tests, a 13-test real-Chromium browser integration suite covering API, WebSocket and client-side persistence, optimistic UI and delayed-response edge cases ([docs/FINDINGS.md](docs/FINDINGS.md)), and seven third-party TodoMVC apps, where it found a real render race in the Sammy.js build ([docs/VALIDATION.md](docs/VALIDATION.md)). Not yet run against a large production app. |
 
 ![Satya catching a UI that shows "Updated!" while the backend keeps the old value](docs/media/ui_lied_demo.gif)
 
@@ -245,12 +245,16 @@ src/
   report/         HTML report (html.py) and JUnit XML report (junit.py) generators
 tests/            pytest suite (tests: claims, VLM, reconciler, auditor, eventual consistency,
                   WebSocket frames, CLI, both report formats, both demo apps) — no browser needed
+tests/browser/    real-Chromium integration suite — see docs/FINDINGS.md
 scripts/
   run_demo.py       one-command end-to-end demo against both apps + HTML report
+  setup_todomvc.sh  pins + extracts the TodoMVC snapshot tests/browser/ and validation/ use
   veritas_cli.py    thin executable wrapper around src/cli.py
 flows.example.yaml         example CLI config, API ground truth (see "Command-line usage")
 flows.reload.example.yaml  example CLI config, reload ground truth (no backend access needed)
 docs/VALIDATION.md         third-party validation: results, false positives fixed, caveats
+docs/FINDINGS.md           browser integration suite: confirmed bugs, false positives, unsupported
+                            cases and inconclusive results, each with a pinned repro command
 validation/todomvc/        configs + seeded-bug patch to reproduce docs/VALIDATION.md
 demo_output/               checked-in sample output from an actual run (HTML + JUnit reports)
 ```
