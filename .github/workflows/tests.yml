@@ -45,8 +45,42 @@ jobs:
           pip install -r requirements.txt
 
       # Unit tests only: reconciler/claim/backend/auditor logic runs with no
-      # browser dependency. Playwright + chromium (needed only for
-      # scripts/run_demo.py's live browser demo) are intentionally not
-      # installed here to keep CI fast.
-      - name: Run test suite
-        run: PYTHONPATH=src pytest tests/ -q
+      # browser dependency. --ignore=tests/browser is load-bearing, not
+      # cosmetic: pytest recurses into subdirectories by default, and
+      # tests/browser/ needs a real Chromium this job never installs (kept
+      # out deliberately, to keep this job fast) -- see the browser-tests
+      # job below for that suite.
+      - name: Run unit test suite
+        run: PYTHONPATH=src pytest tests/ --ignore=tests/browser -q
+
+  browser-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Fetch pinned TodoMVC snapshot
+        run: scripts/setup_todomvc.sh
+
+      # test_inconsistent_reload_rendering.py is excluded here on purpose:
+      # it reproduces a real ~1-in-6-reload race in third-party code (see
+      # docs/FINDINGS.md), so asserting it on every push would make this
+      # job spuriously red about 1 run in 6 through no fault of this repo's
+      # own code. Run it manually/periodically -- see its own docstring for
+      # the command.
+      - name: Run browser integration suite
+        run: >
+          PYTHONPATH=src pytest tests/browser/ -q
+          --ignore=tests/browser/test_inconsistent_reload_rendering.py

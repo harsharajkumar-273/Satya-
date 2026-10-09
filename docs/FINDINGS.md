@@ -16,10 +16,15 @@ scripts/setup_todomvc.sh                    # only needed for the two TodoMVC-ba
 PYTHONPATH=src pytest tests/browser/ -q     # everything, ~2.5 minutes
 ```
 
-Each test file can also be run on its own — see the command in its docstring. `tests/browser/`
-is intentionally excluded from the default `pytest tests/` CI job (same reasoning
-`.github/workflows/tests.yml` already documents for `scripts/run_demo.py`: it needs a real
-browser and is slower, so it's run separately, not on every push).
+Each test file can also be run on its own — see the command in its docstring. In CI
+(`.github/workflows/tests.yml`), the `pytest` job explicitly excludes `tests/browser/`
+(`--ignore=tests/browser`, since pytest otherwise recurses into it even when only `tests/` is
+named) and stays fast with no browser installed; a separate `browser-tests` job installs Chromium
+and `scripts/setup_todomvc.sh`, then runs everything under `tests/browser/` except
+`test_inconsistent_reload_rendering.py`. That one test is excluded from CI specifically, not the
+whole suite: it's a genuine ~1-in-6-reload race (see finding #7 below), so running it on every
+push would make CI spuriously red about once every six runs for a reason that has nothing to do
+with this repo's own code. Run it manually or on a schedule — see its own docstring.
 
 Pinned app versions: every app in `src/*_demo/` is pinned by this repository's own commit — check
 out the commit a given test file was last changed at and you have the exact app it was run
